@@ -160,11 +160,86 @@ class Harness:
         """
         基于验证反馈修复输出
         
-        这是 Harness 的核心：根据 Evaluator 反馈改进 Generator 输出
-        prev_validation.suggestions 包含具体修复方向，供 LLM 修复时使用
+        将 Validator 的 suggestions 和 issues 注入提示词，
+        调用 LLM 修复内容。
         """
-        # TODO: 实现基于反馈的修复逻辑（将 prev_validation.suggestions 注入提示词后重新调用 LLM）
-        return current
+        # 构建修复提示词
+        fix_prompt = self._build_fix_prompt(current, prev_validation)
+        
+        # 调用 LLM 修复
+        try:
+            llm = self.executor._get_llm()
+            fixed_content = llm.complete(fix_prompt)
+            
+            # 解析修复后的输出
+            fixed_data = json.loads(fixed_content)
+            
+            # 构建新的 NoteOutput
+            content = self.executor._to_markdown(fixed_data)
+            
+            return NoteOutput(
+                title=fixed_data.get("title", current.title),
+                content=content,
+                tags=fixed_data.get("tags", current.tags),
+                links=fixed_data.get("suggested_links", current.links),
+                source=current.source,
+                metadata={
+                    **current.metadata,
+                    "revision": True,
+                    "prev_score": prev_validation.score,
+                }
+            )
+        except Exception as e:
+            # 修复失败，返回原始输出
+            print(f"  ⚠️  Revision failed: {e}")
+            return current
+    
+    def _build_fix_prompt(self, current: NoteOutput, validation: ValidationResult) -> str:
+        """构建修复提示词"""
+        issues_text = "\n".join([
+            f"- [{i['severity']}] {i['type']}: {i['message']}"
+            for i in validation.issues
+        ])
+        
+        suggestions_text = "\n".join([
+            f"- {s}"
+            for s in validation.suggestions
+        ])
+        
+        return f"""
+You are a content editor. Fix the following note based on quality feedback.
+
+## Current Content
+```
+{current.content[:2000]}
+```
+
+## Quality Issues
+{issues_text}
+
+## Fix Suggestions
+{suggestions_text}
+
+## Instructions
+1. Fix all issues listed above
+2. Keep the core information intact
+3. Improve structure and clarity
+4. Maintain the same JSON output format
+
+## Output Format
+Return JSON with this structure:
+{{
+    "title": "Improved title",
+    "summary": "Improved summary",
+    "key_points": ["improved point 1", "improved point 2"],
+    "tags": ["tag1", "tag2"],
+    "suggested_links": ["Topic A", "Topic B"],
+    "metadata": {{
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.95
+    }}
+}}
+"""
     
     def _generate_report(self, results: List[Dict]) -> Dict[str, Any]:
         """生成执行报告"""
