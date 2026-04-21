@@ -127,25 +127,56 @@ output:
   vault_path: ~/Obsidian/Vault  # Obsidian 仓库路径
 ```
 
-## 项目结构
+## 目录结构约定
 
+### 输入（原始文件）
 ```
-Lumina/
-├── src/
-│   └── lumina/
-│       ├── __init__.py      # 包入口
-│       ├── planner.py        # 规划模块
-│       ├── executor.py       # 执行模块
-│       ├── validator.py      # 验证模块
-│       ├── harness.py        # 核心协调器
-│       └── cli.py            # 命令行接口
-├── tests/                    # 测试套件
-├── config/                   # 配置文件
-├── docs/                     # 文档
-├── examples/                 # 示例
-├── README.md
-├── requirements.txt
-└── pyproject.toml
+~/Documents/          # 可配置
+├── 项目A/
+│   ├── 需求文档.md
+│   └── 会议纪要.txt
+├── 项目B/
+│   └── 技术方案.pdf
+└── 随手记.md
+```
+
+### 输出（整理后笔记）
+```
+~/Lumina/Notes/       # 可配置
+├── markdown/         # 按类型分目录（可选）
+│   ├── 需求文档.md
+│   └── 随手记.md
+├── pdf/
+│   └── 技术方案.md
+└── text/
+    └── 会议纪要.md
+```
+
+### 配置示例
+
+```yaml
+input:
+  sources:
+    - path: "~/Documents"      # 原始文件位置
+      recursive: true
+      filter: "*.md"
+    - path: "~/Downloads"      # 多个来源
+      recursive: false
+      filter: "*.pdf"
+
+output:
+  plugin: obsidian
+  base_dir: "~/Lumina/Notes"   # 整理后存储位置
+  vault_path: "~/Obsidian/Vault"  # 可选：直接输出到 Obsidian
+  
+  structure:
+    by_date: false             # 不按日期分目录
+    by_type: true              # 按文件类型分目录
+    flat: false                # 不平铺
+  
+  naming:
+    prefix_date: false         # 不加日期前缀
+    slugify: true              # 转义文件名
 ```
 
 ## 核心概念
