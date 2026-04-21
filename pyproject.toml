@@ -7,33 +7,40 @@ name = "lumina"
 version = "0.1.0"
 description = "从本地文件萃取知识，生成结构化笔记的 AI Agent"
 readme = "README.md"
-license = {text = "MIT"}
+license = {text = "CC BY-NC 4.0"}
 authors = [
-    {name = "Ripple", email = "ripple@example.com"}
+    {name = "Ripple", email = "chenboripple@gmail.com"}
 ]
-keywords = ["ai", "knowledge-base", "markdown", "obsidian", "llm"]
+keywords = ["ai", "knowledge-base", "markdown", "obsidian", "llm", "note-taking"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Intended Audience :: End Users/Desktop",
+    "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Markup",
+    "Environment :: Console",
 ]
 requires-python = ">=3.8"
 dependencies = [
     "openai>=1.0.0",
+    "anthropic>=0.18.0",
     "pyyaml>=6.0",
     "markdown>=3.5",
     "python-frontmatter>=1.0.0",
     "watchdog>=3.0.0",
     "click>=8.0.0",
     "rich>=13.0.0",
-    "chromadb>=0.4.0",
-    "sentence-transformers>=2.2.0",
 ]
 
 [project.optional-dependencies]
@@ -44,21 +51,33 @@ dev = [
     "flake8>=6.0.0",
     "mypy>=1.0.0",
 ]
+all = [
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+]
 
 [project.scripts]
 lumina = "lumina.cli:cli"
 
+[project.gui-scripts]
+# 未来可添加 GUI 入口
+# lumina-gui = "lumina.gui:main"
+
 [project.urls]
-Homepage = "https://github.com/ripple/Lumina"
-Repository = "https://github.com/ripple/Lumina"
-Issues = "https://github.com/ripple/Lumina/issues"
+Homepage = "https://github.com/chenboripple/Lumina"
+Repository = "https://github.com/chenboripple/Lumina"
+Issues = "https://github.com/chenboripple/Lumina/issues"
+Documentation = "https://github.com/chenboripple/Lumina#readme"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+lumina = ["templates/*.md", "config/*.yaml"]
+
 [tool.black]
 line-length = 100
-target-version = ['py38', 'py39', 'py310', 'py311']
+target-version = ['py38', 'py39', 'py310', 'py311', 'py312']
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

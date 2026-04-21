@@ -42,19 +42,41 @@
 
 ### 安装
 
+### 跨平台支持
+
+Lumina 支持 **Windows、macOS、Linux** 三大平台。
+
+### 快速安装
+
+**macOS / Linux:**
 ```bash
-# 克隆仓库
-git clone https://github.com/ripple/Lumina.git
+git clone https://github.com/chenboripple/Lumina.git
 cd Lumina
-
-# 创建虚拟环境（推荐）
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
-
-# 安装依赖
-pip install -r requirements.txt
+python install.py
 ```
+
+**Windows:**
+```powershell
+git clone https://github.com/chenboripple/Lumina.git
+cd Lumina
+python install.py
+```
+
+### 使用 pip
+
+```bash
+pip install lumina
+```
+
+### 验证安装
+
+```bash
+lumina --version
+```
+
+更多安装细节见 [docs/installation.md](docs/installation.md)
+
+## 使用
 
 ### 使用
 
