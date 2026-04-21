@@ -1,12 +1,24 @@
 """
 Lumina Configuration Manager
-处理输入/输出目录的配置和验证
+处理配置加载、验证和优先级
+
+配置优先级（从高到低）：
+1. 环境变量（如 OPENAI_API_KEY）
+2. 用户配置文件 ~/.lumina/config.yaml
+3. 项目配置文件 config/lumina.yaml
+4. 代码默认值
 """
 
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
+
+
+# 配置路径常量
+USER_CONFIG_DIR = Path.home() / ".lumina"
+USER_CONFIG_FILE = USER_CONFIG_DIR / "config.yaml"
+PROJECT_CONFIG_FILE = Path(__file__).parent.parent.parent / "config" / "lumina.yaml"
 
 
 @dataclass
@@ -52,16 +64,7 @@ class OutputConfig:
         return None
     
     def get_output_path(self, note_title: str, file_type: str = "") -> Path:
-        """
-        根据配置生成输出路径
-        
-        Args:
-            note_title: 笔记标题
-            file_type: 原始文件类型（用于 by_type 分类）
-            
-        Returns:
-            输出文件路径
-        """
+        """根据配置生成输出路径"""
         base = self.resolve_base_dir()
         
         # 按类型分目录
@@ -92,11 +95,51 @@ class OutputConfig:
     def _slugify(self, text: str) -> str:
         """转义文件名"""
         import re
-        # 替换非法字符
         text = re.sub(r'[^\w\s-]', '', text)
-        # 替换空格为连字符
         text = re.sub(r'[-\s]+', '-', text)
         return text.strip('-').lower()
+
+
+@dataclass
+class LLMConfig:
+    """LLM 配置（含 API Key 管理）"""
+    provider: str = "openai"
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    model: str = "gpt-4"
+    temperature: float = 0.3
+    max_tokens: int = 2000
+    timeout: int = 60
+    max_retries: int = 3
+    retry_delay: float = 1.0
+    
+    def __post_init__(self):
+        """初始化后处理：从环境变量读取 API Key"""
+        if not self.api_key:
+            env_var = f"{self.provider.upper()}_API_KEY"
+            self.api_key = os.getenv(env_var)
+    
+    def validate(self) -> List[str]:
+        """验证 LLM 配置"""
+        errors = []
+        if not self.api_key:
+            errors.append(f"Missing API key for {self.provider} (set {self.provider.upper()}_API_KEY env var)")
+        if not self.base_url:
+            errors.append(f"Missing base URL for {self.provider}")
+        return errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典（排除敏感信息）"""
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+            "retry_delay": self.retry_delay,
+        }
 
 
 @dataclass
@@ -121,21 +164,57 @@ class LuminaConfig:
     })
     
     # LLM 配置
-    llm: Dict[str, Any] = field(default_factory=lambda: {
-        "provider": "openai",
-        "model": "gpt-4",
-        "temperature": 0.3,
-        "max_tokens": 2000,
-    })
+    llm: LLMConfig = field(default_factory=LLMConfig)
     
     @classmethod
-    def from_yaml(cls, path: str) -> "LuminaConfig":
-        """从 YAML 文件加载配置"""
+    def load(cls, config_path: Optional[str] = None) -> "LuminaConfig":
+        """
+        加载配置（按优先级合并）
+        
+        优先级：
+        1. 指定配置文件
+        2. 用户配置 ~/.lumina/config.yaml
+        3. 项目配置 config/lumina.yaml
+        4. 默认值
+        
+        Args:
+            config_path: 指定配置文件路径（可选）
+            
+        Returns:
+            合并后的配置
+        """
         import yaml
         
-        with open(path, 'r') as f:
-            data = yaml.safe_load(f)
+        # 收集所有配置源
+        configs = []
         
+        # 1. 项目默认配置
+        if PROJECT_CONFIG_FILE.exists():
+            with open(PROJECT_CONFIG_FILE, 'r') as f:
+                configs.append(yaml.safe_load(f) or {})
+        
+        # 2. 用户配置（覆盖项目配置）
+        if USER_CONFIG_FILE.exists():
+            with open(USER_CONFIG_FILE, 'r') as f:
+                configs.append(yaml.safe_load(f) or {})
+        
+        # 3. 指定配置（最高优先级）
+        if config_path:
+            path = Path(config_path)
+            if path.exists():
+                with open(path, 'r') as f:
+                    configs.append(yaml.safe_load(f) or {})
+        
+        # 合并配置
+        merged = {}
+        for config in configs:
+            merged = _deep_merge(merged, config)
+        
+        return cls._from_dict(merged)
+    
+    @classmethod
+    def _from_dict(cls, data: Dict[str, Any]) -> "LuminaConfig":
+        """从字典创建配置"""
         # 解析输入源
         sources = []
         for source in data.get("input", {}).get("sources", []):
@@ -155,22 +234,31 @@ class LuminaConfig:
             naming=output_data.get("naming", {}),
         )
         
+        # 解析 LLM 配置
+        llm_data = data.get("llm", {})
+        llm = LLMConfig(
+            provider=llm_data.get("provider", "openai"),
+            base_url=llm_data.get("base_url"),
+            api_key=llm_data.get("api_key"),
+            model=llm_data.get("model", "gpt-4"),
+            temperature=llm_data.get("temperature", 0.3),
+            max_tokens=llm_data.get("max_tokens", 2000),
+            timeout=llm_data.get("timeout", 60),
+            max_retries=llm_data.get("max_retries", 3),
+            retry_delay=llm_data.get("retry_delay", 1.0),
+        )
+        
         return cls(
             input_sources=sources,
             default_recursive=data.get("input", {}).get("default_recursive", True),
             supported_extensions=data.get("input", {}).get("supported_extensions", []),
             output=output,
             harness=data.get("harness", {}),
-            llm=data.get("llm", {}),
+            llm=llm,
         )
     
     def validate(self) -> List[str]:
-        """
-        验证配置有效性
-        
-        Returns:
-            错误信息列表（空表示有效）
-        """
+        """验证配置有效性"""
         errors = []
         
         # 验证输入源
@@ -186,10 +274,58 @@ class LuminaConfig:
         except PermissionError:
             errors.append(f"Cannot create output directory: {output_base}")
         
-        # 验证 Vault 路径（如果配置）
+        # 验证 Vault 路径
         if self.output.vault_path:
             vault = self.output.resolve_vault_path()
             if vault and not vault.exists():
                 errors.append(f"Vault path does not exist: {vault}")
         
+        # 验证 LLM 配置
+        llm_errors = self.llm.validate()
+        errors.extend(llm_errors)
+        
         return errors
+    
+    def save_user_config(self):
+        """保存当前配置到用户配置目录"""
+        import yaml
+        
+        USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        
+        config_dict = {
+            "input": {
+                "sources": [
+                    {
+                        "path": s.path,
+                        "recursive": s.recursive,
+                        "filter": s.filter,
+                    }
+                    for s in self.input_sources
+                ],
+                "default_recursive": self.default_recursive,
+                "supported_extensions": self.supported_extensions,
+            },
+            "output": {
+                "plugin": self.output.plugin,
+                "base_dir": self.output.base_dir,
+                "vault_path": self.output.vault_path,
+                "structure": self.output.structure,
+                "naming": self.output.naming,
+            },
+            "llm": self.llm.to_dict(),
+            "harness": self.harness,
+        }
+        
+        with open(USER_CONFIG_FILE, 'w') as f:
+            yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)
+
+
+def _deep_merge(base: Dict, override: Dict) -> Dict:
+    """深度合并两个字典"""
+    result = base.copy()
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
