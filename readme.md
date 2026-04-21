@@ -129,11 +129,18 @@ black src/ tests/
 
 本项目采用 [Creative Commons Attribution-NonCommercial 4.0 International License](https://creativecommons.org/licenses/by-nc/4.0/)
 
-- ✅ 允许：分享、修改、个人使用
-- ❌ 禁止：商业用途
-- ✅ 要求：保留署名
+**您可以自由：**
+- ✅ **分享** — 在任何媒介或格式中复制、再分发
+- ✅ **修改** — 再创作、转换或基于本作品构建
 
-详见 [LICENSE](LICENSE) 文件
+**在以下条件下：**
+- ✅ **署名** — 您必须给出适当的署名，提供许可证链接，并标明是否做了修改
+- ❌ **非商业性使用** — 您不得将本作品用于商业目的
+
+**附加说明：**
+- 本许可证适用于代码和文档内容
+- 软件免责声明见 [LICENSE](LICENSE) 文件
+- 如果您希望获得商业使用授权，请联系作者
 
 ## 致谢
 
