@@ -74,6 +74,16 @@ pip install lumina
 lumina --version
 ```
 
+### 更新
+
+```bash
+# 检查版本
+python install.py --version
+
+# 更新到最新
+python install.py --update
+```
+
 更多安装细节见 [docs/installation.md](docs/installation.md)
 
 ## 使用

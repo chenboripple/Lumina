@@ -8,6 +8,7 @@ import os
 import sys
 import subprocess
 import platform
+import argparse
 from pathlib import Path
 
 
@@ -34,6 +35,11 @@ def check_python():
     return True
 
 
+def get_install_dir():
+    """获取安装目录"""
+    return Path(__file__).parent
+
+
 def install_dependencies():
     """安装依赖"""
     print("\n📦 安装依赖...")
@@ -46,6 +52,85 @@ def install_dependencies():
     except subprocess.CalledProcessError as e:
         print(f"❌ 依赖安装失败: {e}")
         return False
+
+
+def update_lumina():
+    """更新 Lumina"""
+    print("\n🔄 检查更新...")
+    install_dir = get_install_dir()
+    
+    # 检查是否是 git 仓库
+    git_dir = install_dir / ".git"
+    if not git_dir.exists():
+        print("❌ 不是 git 仓库，无法自动更新")
+        print("   建议重新克隆仓库:")
+        print("   git clone https://github.com/chenboripple/Lumina.git")
+        return False
+    
+    try:
+        # 拉取最新代码
+        print("📥 拉取最新代码...")
+        subprocess.check_call(
+            ["git", "pull", "origin", "release-ripple"],
+            cwd=install_dir
+        )
+        
+        # 重新安装
+        print("📦 重新安装...")
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "install", "-e", "."
+        ], cwd=install_dir)
+        
+        print("✅ 更新完成!")
+        return True
+        
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 更新失败: {e}")
+        return False
+
+
+def check_version():
+    """检查当前版本"""
+    try:
+        import lumina
+        print(f"当前版本: {lumina.__version__}")
+        
+        # 检查最新版本（通过 git）
+        install_dir = get_install_dir()
+        if (install_dir / ".git").exists():
+            result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=install_dir,
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                current_commit = result.stdout.strip()[:7]
+                print(f"当前 commit: {current_commit}")
+                
+                # 获取远程最新 commit
+                subprocess.run(
+                    ["git", "fetch", "origin", "release-ripple"],
+                    cwd=install_dir,
+                    capture_output=True
+                )
+                result = subprocess.run(
+                    ["git", "rev-parse", "origin/release-ripple"],
+                    cwd=install_dir,
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    remote_commit = result.stdout.strip()[:7]
+                    print(f"远程最新: {remote_commit}")
+                    
+                    if current_commit != remote_commit:
+                        print("⚠️  有新版本可用，运行 `python install.py --update` 更新")
+                    else:
+                        print("✅ 已是最新版本")
+                        
+    except ImportError:
+        print("❌ Lumina 未安装")
 
 
 def create_config():
@@ -114,6 +199,21 @@ def setup_shell_completion():
 
 def main():
     """主安装流程"""
+    parser = argparse.ArgumentParser(description="Lumina 安装工具")
+    parser.add_argument("--update", action="store_true", help="更新到最新版本")
+    parser.add_argument("--version", action="store_true", help="检查版本")
+    args = parser.parse_args()
+    
+    if args.version:
+        check_version()
+        return
+    
+    if args.update:
+        print_banner()
+        update_lumina()
+        return
+    
+    # 默认：安装
     print_banner()
     
     print(f"\n🔍 系统信息:")
@@ -136,6 +236,8 @@ def main():
     print("   lumina scan ~/Documents --output ./notes")
     print("\n配置文件:")
     print(f"   {Path.home() / '.lumina' / 'config.yaml'}")
+    print("\n更新命令:")
+    print("   python install.py --update")
     print("\n更多帮助:")
     print("   lumina --help")
     print()

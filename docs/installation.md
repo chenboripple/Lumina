@@ -102,8 +102,31 @@ lumina config ~/.lumina/config.yaml
 
 ## 更新
 
+### 使用 install.py 更新（推荐）
+
+```bash
+# 进入 Lumina 目录
+cd Lumina
+
+# 检查版本
+python install.py --version
+
+# 更新到最新
+python install.py --update
+```
+
+### 使用 pip 更新
+
 ```bash
 pip install --upgrade lumina
+```
+
+### 手动更新
+
+```bash
+cd Lumina
+git pull origin release-ripple
+pip install -e ".[dev]"
 ```
 
 ## 卸载
