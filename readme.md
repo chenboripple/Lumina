@@ -127,7 +127,13 @@ black src/ tests/
 
 ## 许可证
 
-MIT License - 详见 [LICENSE](LICENSE) 文件
+本项目采用 [Creative Commons Attribution-NonCommercial 4.0 International License](https://creativecommons.org/licenses/by-nc/4.0/)
+
+- ✅ 允许：分享、修改、个人使用
+- ❌ 禁止：商业用途
+- ✅ 要求：保留署名
+
+详见 [LICENSE](LICENSE) 文件
 
 ## 致谢
 
