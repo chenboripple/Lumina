@@ -1,19 +1,17 @@
 # Lumina Configuration
 
-harness:
-  max_iterations: 3
-  quality_threshold: 0.8
-  output_dir: "./output"
-  vault_path: "~/Obsidian/Vault"
-
-llm:
-  provider: "openai"  # openai | anthropic | local
-  model: "gpt-4"
-  temperature: 0.3
-  max_tokens: 2000
-
-planner:
-  batch_size: 10
+# 输入配置：原始文件来源
+input:
+  sources:
+    - path: "~/Documents"      # 原始文件目录
+      recursive: true          # 是否递归子目录
+      filter: "*.md"           # 文件过滤规则
+    - path: "~/Downloads"
+      recursive: false
+      filter: "*.pdf"
+  
+  # 全局输入设置
+  default_recursive: true
   supported_extensions:
     - ".md"
     - ".txt"
@@ -24,6 +22,41 @@ planner:
     - ".json"
     - ".yaml"
     - ".yml"
+    - ".png"
+    - ".jpg"
+
+# 输出配置：整理后的笔记存储
+output:
+  plugin: obsidian              # 输出格式插件
+  base_dir: "~/Lumina/Notes"    # 整理后笔记的根目录
+  vault_path: "~/Obsidian/Vault" # Obsidian 仓库路径（如使用 Obsidian 插件）
+  
+  # 目录结构约定
+  structure:
+    by_date: false              # 是否按日期分目录
+    by_type: true               # 是否按文件类型分目录
+    flat: false                 # 是否平铺存储
+  
+  # 命名约定
+  naming:
+    prefix_date: false          # 文件名是否加日期前缀
+    slugify: true               # 是否转义文件名
+
+# Harness 核心配置
+harness:
+  max_iterations: 3
+  quality_threshold: 0.8
+
+# LLM 配置
+llm:
+  provider: "openai"
+  model: "gpt-4"
+  temperature: 0.3
+  max_tokens: 2000
+
+# 处理配置
+planner:
+  batch_size: 10
 
 executor:
   template_dir: "./templates"
@@ -44,17 +77,3 @@ validator:
       weight: 0.15
     structure:
       weight: 0.15
-
-output:
-  format: "markdown"
-  frontmatter: true
-  include_metadata: true
-  include_links: true
-
-sources:
-  - path: "~/Documents"
-    recursive: true
-    filter: "*.md"
-  - path: "~/Downloads"
-    recursive: false
-    filter: "*.pdf"

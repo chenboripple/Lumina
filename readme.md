@@ -1,6 +1,10 @@
 # Lumina
 
 > 从本地文件萃取知识，生成结构化笔记的 AI Agent
+> 
+> **专注**：本地文件收集 → 智能整理 → 质量优化 → 格式化输出
+> 
+> **目标**：为 Obsidian 等笔记工具提供高质量、可查询的知识库素材
 
 ## 核心架构：Harness Engineering
 
@@ -19,13 +23,22 @@
 
 ## 特性
 
-- 🗂️ **本地文件扫描** - 自动发现文档、图片、代码等
-- 🤖 **AI 内容理解** - 基于 LLM 提取核心信息
-- 📝 **结构化笔记生成** - Markdown 格式，兼容 Obsidian
-- 🔗 **自动关联发现** - 识别内容关联，建议双向链接
+- 📁 **本地文件收集** - 自动扫描目录，发现文档、图片、代码等各类文件
+- 🧠 **智能整理** - 基于 AI 提取核心信息，去重归类
 - 🔄 **迭代优化** - Harness 验证-修复循环，确保输出质量
+- 📝 **格式化输出** - 生成标准 Markdown，兼容 Obsidian 等笔记工具
+- 🔗 **自动关联** - 识别内容关联，建议双向链接，便于查询
+- 🎯 **笔记工具友好** - 默认支持 Obsidian 格式，可扩展其他工具
 
 ## 快速开始
+
+### 工作流
+
+```
+本地文件 → Lumina 收集整理 → 生成 Markdown → Obsidian 查询使用
+    ↑                                              ↓
+    └────────────── 持续迭代优化 ──────────────────┘
+```
 
 ### 安装
 
@@ -53,6 +66,48 @@ python -m lumina scan ~/Documents --output ./notes
 python -m lumina config config/lumina.yaml
 ```
 
+## 输出格式
+
+Lumina 采用**插件化输出架构**，支持多种笔记工具：
+
+### 内置插件
+
+| 插件 | 目标工具 | 状态 |
+|------|---------|------|
+| `obsidian` | Obsidian | ✅ 默认 |
+| `notion` | Notion | 🚧 计划中 |
+| `logseq` | Logseq | 🚧 计划中 |
+| `plain` | 纯 Markdown | ✅ 内置 |
+
+### 配置方式
+
+```yaml
+output:
+  plugin: obsidian  # 切换插件即可更换输出格式
+  vault_path: ~/Obsidian/Vault
+```
+
+### 插件接口
+
+每个插件实现统一接口：
+- `format(note)` - 格式化单条笔记
+- `frontmatter(metadata)` - 生成前置元数据
+- `link_syntax(target)` - 链接语法转换
+- `tag_syntax(tags)` - 标签语法转换
+
+### 自定义插件
+
+```python
+from lumina.plugins import BasePlugin
+
+class MyPlugin(BasePlugin):
+    def format(self, note):
+        return f"# {note.title}\n\n{note.content}"
+    
+    def link_syntax(self, target):
+        return f"[{target}]"
+```
+
 ## 配置
 
 编辑 `config/lumina.yaml`：
@@ -72,28 +127,76 @@ output:
   vault_path: ~/Obsidian/Vault  # Obsidian 仓库路径
 ```
 
-## 项目结构
+## 目录结构约定
 
+### 输入（原始文件）
 ```
-Lumina/
-├── src/
-│   └── lumina/
-│       ├── __init__.py      # 包入口
-│       ├── planner.py        # 规划模块
-│       ├── executor.py       # 执行模块
-│       ├── validator.py      # 验证模块
-│       ├── harness.py        # 核心协调器
-│       └── cli.py            # 命令行接口
-├── tests/                    # 测试套件
-├── config/                   # 配置文件
-├── docs/                     # 文档
-├── examples/                 # 示例
-├── README.md
-├── requirements.txt
-└── pyproject.toml
+~/Documents/          # 可配置
+├── 项目A/
+│   ├── 需求文档.md
+│   └── 会议纪要.txt
+├── 项目B/
+│   └── 技术方案.pdf
+└── 随手记.md
+```
+
+### 输出（整理后笔记）
+```
+~/Lumina/Notes/       # 可配置
+├── markdown/         # 按类型分目录（可选）
+│   ├── 需求文档.md
+│   └── 随手记.md
+├── pdf/
+│   └── 技术方案.md
+└── text/
+    └── 会议纪要.md
+```
+
+### 配置示例
+
+```yaml
+input:
+  sources:
+    - path: "~/Documents"      # 原始文件位置
+      recursive: true
+      filter: "*.md"
+    - path: "~/Downloads"      # 多个来源
+      recursive: false
+      filter: "*.pdf"
+
+output:
+  plugin: obsidian
+  base_dir: "~/Lumina/Notes"   # 整理后存储位置
+  vault_path: "~/Obsidian/Vault"  # 可选：直接输出到 Obsidian
+  
+  structure:
+    by_date: false             # 不按日期分目录
+    by_type: true              # 按文件类型分目录
+    flat: false                # 不平铺
+  
+  naming:
+    prefix_date: false         # 不加日期前缀
+    slugify: true              # 转义文件名
 ```
 
 ## 核心概念
+
+### 定位：知识的预处理管道
+
+Lumina 不是笔记工具本身，而是**笔记的预处理管道**：
+
+```
+┌─────────────┐    ┌─────────────┐    ┌─────────────┐
+│  收集文件    │ →  │  整理优化    │ →  │  格式化输出  │
+│  (Planner)  │    │  (Executor) │    │ (Validator) │
+└─────────────┘    └─────────────┘    └─────────────┘
+      ↓                   ↓                   ↓
+  扫描本地目录        AI 提取核心        生成标准
+  发现各类文件        信息去重归类        Markdown
+                                           ↓
+                                    Obsidian 等工具
+                                    查询使用
+```
 
 ### Harness Engineering
 
