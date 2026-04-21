@@ -5,8 +5,7 @@ Lumina Configuration Manager
 配置优先级（从高到低）：
 1. 环境变量（如 OPENAI_API_KEY）
 2. 用户配置文件 ~/.lumina/config.yaml
-3. 项目配置文件 config/lumina.yaml
-4. 代码默认值
+3. 代码默认值
 """
 
 import os
@@ -18,7 +17,6 @@ from dataclasses import dataclass, field
 # 配置路径常量
 USER_CONFIG_DIR = Path.home() / ".lumina"
 USER_CONFIG_FILE = USER_CONFIG_DIR / "config.yaml"
-PROJECT_CONFIG_FILE = Path(__file__).parent.parent.parent / "config" / "lumina.yaml"
 
 
 @dataclass
@@ -172,49 +170,33 @@ class LuminaConfig:
         加载配置（按优先级合并）
         
         优先级：
-        1. 指定配置文件
-        2. 用户配置 ~/.lumina/config.yaml
-        3. 项目配置 config/lumina.yaml
-        4. 默认值
+        1. 环境变量（如 OPENAI_API_KEY）
+        2. 用户配置文件 ~/.lumina/config.yaml
+        3. 代码默认值
         
         Args:
-            config_path: 指定配置文件路径（可选）
+            config_path: 指定用户配置文件路径（可选，覆盖默认路径）
             
         Returns:
             合并后的配置
         """
         import yaml
         
-        # 收集所有配置源
-        configs = []
+        # 收集配置
+        user_config = {}
         
-        # 1. 项目默认配置
-        if PROJECT_CONFIG_FILE.exists():
-            with open(PROJECT_CONFIG_FILE, 'r') as f:
-                configs.append(yaml.safe_load(f) or {})
+        # 1. 加载用户配置
+        target_config_file = Path(config_path) if config_path else USER_CONFIG_FILE
+        if target_config_file.exists():
+            with open(target_config_file, 'r') as f:
+                user_config = yaml.safe_load(f) or {}
         
-        # 2. 用户配置（覆盖项目配置）
-        if USER_CONFIG_FILE.exists():
-            with open(USER_CONFIG_FILE, 'r') as f:
-                configs.append(yaml.safe_load(f) or {})
-        
-        # 3. 指定配置（最高优先级）
-        if config_path:
-            path = Path(config_path)
-            if path.exists():
-                with open(path, 'r') as f:
-                    configs.append(yaml.safe_load(f) or {})
-        
-        # 合并配置
-        merged = {}
-        for config in configs:
-            merged = _deep_merge(merged, config)
-        
-        return cls._from_dict(merged)
+        # 2. 用用户配置覆盖默认值创建配置
+        return cls._from_dict(user_config)
     
     @classmethod
     def _from_dict(cls, data: Dict[str, Any]) -> "LuminaConfig":
-        """从字典创建配置"""
+        """从字典创建配置（未提供的字段使用默认值）"""
         # 解析输入源
         sources = []
         for source in data.get("input", {}).get("sources", []):
@@ -318,14 +300,3 @@ class LuminaConfig:
         
         with open(USER_CONFIG_FILE, 'w') as f:
             yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)
-
-
-def _deep_merge(base: Dict, override: Dict) -> Dict:
-    """深度合并两个字典"""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
