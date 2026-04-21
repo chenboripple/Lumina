@@ -68,45 +68,45 @@ python -m lumina config config/lumina.yaml
 
 ## 输出格式
 
-Lumina 生成的笔记专为**笔记工具查询**优化：
+Lumina 采用**插件化输出架构**，支持多种笔记工具：
 
-```markdown
----
-title: "笔记标题"
-tags: ["tag1", "tag2"]
-source: "原始文件路径"
-lumina_score: 0.95
----
+### 内置插件
 
-## 摘要
+| 插件 | 目标工具 | 状态 |
+|------|---------|------|
+| `obsidian` | Obsidian | ✅ 默认 |
+| `notion` | Notion | 🚧 计划中 |
+| `logseq` | Logseq | 🚧 计划中 |
+| `plain` | 纯 Markdown | ✅ 内置 |
 
-核心内容概述...
+### 配置方式
 
-## 要点
-
-- 关键点 1
-- 关键点 2
-
-## 关联主题
-
-- [[相关笔记 A]]
-- [[相关笔记 B]]
+```yaml
+output:
+  plugin: obsidian  # 切换插件即可更换输出格式
+  vault_path: ~/Obsidian/Vault
 ```
 
-### 默认支持：Obsidian
+### 插件接口
 
-- ✅ 标准 Markdown 格式
-- ✅ YAML Frontmatter 元数据
-- ✅ `[[双向链接]]` 语法
-- ✅ 标签系统兼容
-- ✅ 可配置 Vault 输出路径
+每个插件实现统一接口：
+- `format(note)` - 格式化单条笔记
+- `frontmatter(metadata)` - 生成前置元数据
+- `link_syntax(target)` - 链接语法转换
+- `tag_syntax(tags)` - 标签语法转换
 
-### 可扩展支持
+### 自定义插件
 
-通过自定义模板，可适配：
-- Logseq
-- Notion（导出）
-- 其他 Markdown 笔记工具
+```python
+from lumina.plugins import BasePlugin
+
+class MyPlugin(BasePlugin):
+    def format(self, note):
+        return f"# {note.title}\n\n{note.content}"
+    
+    def link_syntax(self, target):
+        return f"[{target}]"
+```
 
 ## 配置
 

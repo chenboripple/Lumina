@@ -46,10 +46,9 @@ validator:
       weight: 0.15
 
 output:
-  format: "markdown"
-  frontmatter: true
-  include_metadata: true
-  include_links: true
+  plugin: obsidian  # 可选: obsidian | plain | notion
+  vault_path: "~/Obsidian/Vault"
+  # notion_api_key: xxx  # Notion 集成时需要
 
 sources:
   - path: "~/Documents"
