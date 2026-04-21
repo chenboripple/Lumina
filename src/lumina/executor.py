@@ -164,7 +164,7 @@ Return JSON with this structure:
                 f"\n## Related Topics\n",
             ])
             for link in data["suggested_links"]:
-                lines.append(f"- [[{link}]]\n")
+                lines.append(f"- {link}\n")
         
         lines.extend([
             f"\n## Metadata\n",

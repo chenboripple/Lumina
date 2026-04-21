@@ -123,7 +123,7 @@ llm:
   model: gpt-4            # 模型选择
 
 output:
-  format: markdown        # 输出格式
+  plugin: plain           # 输出格式插件（obsidian / plain）
   vault_path: ~/Obsidian/Vault  # Obsidian 仓库路径
 ```
 

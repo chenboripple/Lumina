@@ -53,16 +53,27 @@ def scan(path, recursive, output, threshold, max_rounds):
 @click.argument('config_path', type=click.Path(exists=True))
 def config(config_path):
     """加载配置文件运行"""
-    import yaml
-    
-    with open(config_path, 'r') as f:
-        config_data = yaml.safe_load(f)
-    
-    harness_config = HarnessConfig(**config_data.get('harness', {}))
+    from .config import LuminaConfig
+
+    lumina_config = LuminaConfig.from_yaml(config_path)
+    errors = lumina_config.validate()
+    if errors:
+        for err in errors:
+            click.echo(f"❌ Config error: {err}", err=True)
+        raise SystemExit(1)
+
+    harness_config = HarnessConfig(
+        max_iterations=lumina_config.harness.get("max_iterations", 3),
+        quality_threshold=lumina_config.harness.get("quality_threshold", 0.8),
+        output_dir=str(lumina_config.output.resolve_base_dir()),
+        vault_path=lumina_config.output.vault_path,
+        plugin=lumina_config.output.plugin,
+    )
     harness = Harness(harness_config)
-    
-    for source in config_data.get('sources', []):
-        harness.run(source['path'], source.get('recursive', True))
+
+    for source in lumina_config.input_sources:
+        report = harness.run(str(source.resolve_path()), source.recursive)
+        click.echo(f"✅ {source.path}: {report['total_files']} files processed")
 
 
 if __name__ == '__main__':
