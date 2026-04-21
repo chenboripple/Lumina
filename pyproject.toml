@@ -1,0 +1,73 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lumina"
+version = "0.1.0"
+description = "从本地文件萃取知识，生成结构化笔记的 AI Agent"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Ripple", email = "ripple@example.com"}
+]
+keywords = ["ai", "knowledge-base", "markdown", "obsidian", "llm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "openai>=1.0.0",
+    "pyyaml>=6.0",
+    "markdown>=3.5",
+    "python-frontmatter>=1.0.0",
+    "watchdog>=3.0.0",
+    "click>=8.0.0",
+    "rich>=13.0.0",
+    "chromadb>=0.4.0",
+    "sentence-transformers>=2.2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+]
+
+[project.scripts]
+lumina = "lumina.cli:cli"
+
+[project.urls]
+Homepage = "https://github.com/ripple/Lumina"
+Repository = "https://github.com/ripple/Lumina"
+Issues = "https://github.com/ripple/Lumina/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.black]
+line-length = 100
+target-version = ['py38', 'py39', 'py310', 'py311']
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true

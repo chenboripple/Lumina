@@ -1,0 +1,60 @@
+# Lumina Configuration
+
+harness:
+  max_iterations: 3
+  quality_threshold: 0.8
+  output_dir: "./output"
+  vault_path: "~/Obsidian/Vault"
+
+llm:
+  provider: "openai"  # openai | anthropic | local
+  model: "gpt-4"
+  temperature: 0.3
+  max_tokens: 2000
+
+planner:
+  batch_size: 10
+  supported_extensions:
+    - ".md"
+    - ".txt"
+    - ".pdf"
+    - ".py"
+    - ".js"
+    - ".ts"
+    - ".json"
+    - ".yaml"
+    - ".yml"
+
+executor:
+  template_dir: "./templates"
+  default_template: "standard"
+
+validator:
+  rules:
+    content_length:
+      min: 100
+      weight: 0.3
+    title_quality:
+      weight: 0.2
+    tag_coverage:
+      min: 1
+      weight: 0.2
+    link_quality:
+      max_ratio: 0.3
+      weight: 0.15
+    structure:
+      weight: 0.15
+
+output:
+  format: "markdown"
+  frontmatter: true
+  include_metadata: true
+  include_links: true
+
+sources:
+  - path: "~/Documents"
+    recursive: true
+    filter: "*.md"
+  - path: "~/Downloads"
+    recursive: false
+    filter: "*.pdf"
