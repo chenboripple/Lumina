@@ -9,6 +9,8 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass
 import json
 
+from .llm import get_llm_provider, LLMConfig, BaseLLMProvider
+
 
 @dataclass
 class NoteOutput:
@@ -32,10 +34,16 @@ class Executor:
     4. 提取标签和链接
     """
     
-    def __init__(self, llm_provider: str = "openai", config: Dict[str, Any] = None):
-        self.llm_provider = llm_provider
-        self.config = config or {}
+    def __init__(self, llm_config: Dict[str, Any] = None):
+        self.llm_config = llm_config or {}
+        self.llm_provider: Optional[BaseLLMProvider] = None
         self.prompt_template = self._load_template()
+    
+    def _get_llm(self) -> BaseLLMProvider:
+        """获取或创建 LLM Provider"""
+        if self.llm_provider is None:
+            self.llm_provider = get_llm_provider(self.llm_config)
+        return self.llm_provider
     
     def execute(self, file_info, plan: Dict[str, Any]) -> NoteOutput:
         """
@@ -110,16 +118,20 @@ Return JSON with this structure:
 """
     
     def _call_llm(self, prompt: str) -> str:
-        """调用 LLM（占位实现）"""
-        # TODO: 集成实际 LLM API
-        return json.dumps({
-            "title": "Sample Note",
-            "summary": "This is a placeholder output",
-            "key_points": ["Point 1", "Point 2"],
-            "tags": ["sample"],
-            "suggested_links": [],
-            "metadata": {"complexity": "simple", "confidence": 0.9}
-        })
+        """调用 LLM"""
+        try:
+            llm = self._get_llm()
+            return llm.complete(prompt)
+        except Exception as e:
+            # 降级处理：返回错误信息
+            return json.dumps({
+                "title": "Error",
+                "summary": f"LLM call failed: {str(e)}",
+                "key_points": [],
+                "tags": ["error"],
+                "suggested_links": [],
+                "metadata": {"complexity": "simple", "confidence": 0.0, "error": str(e)}
+            })
     
     def _parse_output(self, raw_output: str, file_info) -> NoteOutput:
         """解析 LLM 输出"""
@@ -164,7 +176,7 @@ Return JSON with this structure:
                 f"\n## Related Topics\n",
             ])
             for link in data["suggested_links"]:
-                lines.append(f"- [[{link}]]\n")
+                lines.append(f"- {link}\n")
         
         lines.extend([
             f"\n## Metadata\n",

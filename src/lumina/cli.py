@@ -1,5 +1,6 @@
 """
 Lumina CLI - 命令行入口
+连接配置系统，支持配置文件和命令行参数
 """
 
 import click
@@ -7,6 +8,7 @@ from pathlib import Path
 import json
 
 from .harness import Harness, HarnessConfig
+from .config import LuminaConfig
 
 
 @click.group()
@@ -18,20 +20,38 @@ def cli():
 
 @cli.command()
 @click.argument('path', type=click.Path(exists=True))
-@click.option('--recursive', '-r', is_flag=True, default=True, help='递归扫描')
-@click.option('--output', '-o', default='./output', help='输出目录')
-@click.option('--threshold', '-t', default=0.8, help='质量阈值')
-@click.option('--max-rounds', '-m', default=3, help='最大迭代轮数')
-def scan(path, recursive, output, threshold, max_rounds):
+@click.option('--config', '-c', type=click.Path(), help='配置文件路径')
+@click.option('--recursive', '-r', is_flag=True, default=None, help='递归扫描')
+@click.option('--output', '-o', default=None, help='输出目录')
+@click.option('--threshold', '-t', default=None, type=float, help='质量阈值')
+@click.option('--max-rounds', '-m', default=None, type=int, help='最大迭代轮数')
+@click.option('--plugin', '-p', default=None, help='输出插件')
+def scan(path, config, recursive, output, threshold, max_rounds, plugin):
     """扫描文件并生成笔记"""
     
-    config = HarnessConfig(
-        output_dir=output,
-        quality_threshold=threshold,
-        max_iterations=max_rounds
+    # 加载配置
+    lumina_config = LuminaConfig.load(config)
+    
+    # 命令行参数覆盖配置文件
+    if recursive is not None:
+        pass  # 通过命令行传入
+    else:
+        recursive = True  # 默认
+    
+    # 构建 Harness 配置
+    harness_config = HarnessConfig(
+        output_dir=output or str(lumina_config.output.resolve_base_dir()),
+        quality_threshold=threshold or lumina_config.harness.get("quality_threshold", 0.8),
+        max_iterations=max_rounds or lumina_config.harness.get("max_iterations", 3),
+        plugin=plugin or lumina_config.output.plugin,
+        vault_path=lumina_config.output.vault_path,
     )
     
-    harness = Harness(config)
+    # 传递 LLM 配置到 Executor
+    harness = Harness(harness_config)
+    harness.executor.llm_config = lumina_config.llm.to_dict()
+    
+    # 执行
     report = harness.run(path, recursive)
     
     # 打印报告
@@ -44,7 +64,7 @@ def scan(path, recursive, output, threshold, max_rounds):
     click.echo(f"Threshold: {report['threshold']}")
     
     # 保存报告
-    report_path = Path(output) / "lumina_report.json"
+    report_path = Path(harness_config.output_dir) / "lumina_report.json"
     report_path.write_text(json.dumps(report, indent=2), encoding='utf-8')
     click.echo(f"\n📄 Report saved: {report_path}")
 
@@ -53,16 +73,35 @@ def scan(path, recursive, output, threshold, max_rounds):
 @click.argument('config_path', type=click.Path(exists=True))
 def config(config_path):
     """加载配置文件运行"""
-    import yaml
-    
-    with open(config_path, 'r') as f:
-        config_data = yaml.safe_load(f)
-    
-    harness_config = HarnessConfig(**config_data.get('harness', {}))
+    lumina_config = LuminaConfig.load(config_path)
+    errors = lumina_config.validate()
+    if errors:
+        for err in errors:
+            click.echo(f"❌ Config error: {err}", err=True)
+        raise SystemExit(1)
+
+    harness_config = HarnessConfig(
+        max_iterations=lumina_config.harness.get("max_iterations", 3),
+        quality_threshold=lumina_config.harness.get("quality_threshold", 0.8),
+        output_dir=str(lumina_config.output.resolve_base_dir()),
+        vault_path=lumina_config.output.vault_path,
+        plugin=lumina_config.output.plugin,
+    )
     harness = Harness(harness_config)
-    
-    for source in config_data.get('sources', []):
-        harness.run(source['path'], source.get('recursive', True))
+    harness.executor.llm_config = lumina_config.llm.to_dict()
+
+    for source in lumina_config.input_sources:
+        report = harness.run(str(source.resolve_path()), source.recursive)
+        click.echo(f"✅ {source.path}: {report['total_files']} files processed")
+
+
+@cli.command()
+def init():
+    """初始化用户配置"""
+    config = LuminaConfig()
+    config.save_user_config()
+    click.echo(f"✅ 配置文件已创建: {Path.home() / '.lumina' / 'config.yaml'}")
+    click.echo("请编辑配置文件设置您的 LLM API Key")
 
 
 if __name__ == '__main__':

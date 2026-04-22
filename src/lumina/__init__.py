@@ -17,6 +17,13 @@ from .plugins import (
     get_plugin,
     list_plugins,
 )
+from .llm import (
+    BaseLLMProvider,
+    OpenAIProvider,
+    AnthropicProvider,
+    LLMProviderFactory,
+    get_llm_provider,
+)
 
 __all__ = [
     "Planner",
@@ -28,4 +35,9 @@ __all__ = [
     "PlainMarkdownPlugin",
     "get_plugin",
     "list_plugins",
+    "BaseLLMProvider",
+    "OpenAIProvider",
+    "AnthropicProvider",
+    "LLMProviderFactory",
+    "get_llm_provider",
 ]

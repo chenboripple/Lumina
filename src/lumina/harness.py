@@ -3,14 +3,14 @@ Harness - 核心协调器
 整合 Planner + Executor + Validator，实现迭代优化
 """
 
-import json
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 
 from .planner import Planner, FileInfo
 from .executor import Executor, NoteOutput
 from .validator import Validator, ValidationResult
+from .plugins import get_plugin, NoteData
 
 
 @dataclass
@@ -20,6 +20,7 @@ class HarnessConfig:
     quality_threshold: float = 0.8
     output_dir: str = "./output"
     vault_path: Optional[str] = None
+    plugin: str = "obsidian"
 
 
 class Harness:
@@ -47,6 +48,7 @@ class Harness:
         self.planner = Planner()
         self.executor = Executor()
         self.validator = Validator()
+        self.plugin = get_plugin(self.config.plugin)
         
         # 运行状态
         self.iteration_count = 0
@@ -99,6 +101,7 @@ class Harness:
         """
         self.iteration_count = 0
         current_output = None
+        last_validation: Optional[ValidationResult] = None
         
         iteration_history = []
         
@@ -109,14 +112,11 @@ class Harness:
             if iteration == 0:
                 current_output = self.executor.execute(file_info, plan)
             else:
-                # 基于反馈修复
-                current_output = self._revise_output(
-                    current_output, 
-                    iteration_history[-1]['validation']
-                )
+                # 基于反馈修复（传入完整验证结果）
+                current_output = self._revise_output(current_output, last_validation)
             
             # 验证
-            validation = self.validator.validate(current_output)
+            last_validation = self.validator.validate(current_output)
             
             # 记录
             iteration_history.append({
@@ -127,20 +127,20 @@ class Harness:
                     "tags": current_output.tags,
                 },
                 "validation": {
-                    "score": validation.score,
-                    "passed": validation.passed,
-                    "issues": len(validation.issues),
+                    "score": last_validation.score,
+                    "passed": last_validation.passed,
+                    "issues": len(last_validation.issues),
                 }
             })
             
-            print(f"  Round {iteration + 1}: score={validation.score:.2f}, passed={validation.passed}")
+            print(f"  Round {iteration + 1}: score={last_validation.score:.2f}, passed={last_validation.passed}")
             
             # 检查终止条件
-            if validation.passed and validation.score >= self.config.quality_threshold:
+            if last_validation.passed and last_validation.score >= self.config.quality_threshold:
                 print(f"  ✅ Quality threshold reached!")
                 break
             
-            if not validation.suggestions:
+            if not last_validation.suggestions:
                 print(f"  ⚠️  No suggestions for improvement, stopping")
                 break
         
@@ -156,15 +156,90 @@ class Harness:
             "history": iteration_history,
         }
     
-    def _revise_output(self, current: NoteOutput, prev_validation: Dict) -> NoteOutput:
+    def _revise_output(self, current: NoteOutput, prev_validation: ValidationResult) -> NoteOutput:
         """
         基于验证反馈修复输出
         
-        这是 Harness 的核心：根据 Evaluator 反馈改进 Generator 输出
+        将 Validator 的 suggestions 和 issues 注入提示词，
+        调用 LLM 修复内容。
         """
-        # TODO: 实现基于反馈的修复逻辑
-        # 当前简化：直接返回（实际应调用 LLM 修复）
-        return current
+        # 构建修复提示词
+        fix_prompt = self._build_fix_prompt(current, prev_validation)
+        
+        # 调用 LLM 修复
+        try:
+            llm = self.executor._get_llm()
+            fixed_content = llm.complete(fix_prompt)
+            
+            # 解析修复后的输出
+            fixed_data = json.loads(fixed_content)
+            
+            # 构建新的 NoteOutput
+            content = self.executor._to_markdown(fixed_data)
+            
+            return NoteOutput(
+                title=fixed_data.get("title", current.title),
+                content=content,
+                tags=fixed_data.get("tags", current.tags),
+                links=fixed_data.get("suggested_links", current.links),
+                source=current.source,
+                metadata={
+                    **current.metadata,
+                    "revision": True,
+                    "prev_score": prev_validation.score,
+                }
+            )
+        except Exception as e:
+            # 修复失败，返回原始输出
+            print(f"  ⚠️  Revision failed: {e}")
+            return current
+    
+    def _build_fix_prompt(self, current: NoteOutput, validation: ValidationResult) -> str:
+        """构建修复提示词"""
+        issues_text = "\n".join([
+            f"- [{i['severity']}] {i['type']}: {i['message']}"
+            for i in validation.issues
+        ])
+        
+        suggestions_text = "\n".join([
+            f"- {s}"
+            for s in validation.suggestions
+        ])
+        
+        return f"""
+You are a content editor. Fix the following note based on quality feedback.
+
+## Current Content
+```
+{current.content[:2000]}
+```
+
+## Quality Issues
+{issues_text}
+
+## Fix Suggestions
+{suggestions_text}
+
+## Instructions
+1. Fix all issues listed above
+2. Keep the core information intact
+3. Improve structure and clarity
+4. Maintain the same JSON output format
+
+## Output Format
+Return JSON with this structure:
+{{
+    "title": "Improved title",
+    "summary": "Improved summary",
+    "key_points": ["improved point 1", "improved point 2"],
+    "tags": ["tag1", "tag2"],
+    "suggested_links": ["Topic A", "Topic B"],
+    "metadata": {{
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.95
+    }}
+}}
+"""
     
     def _generate_report(self, results: List[Dict]) -> Dict[str, Any]:
         """生成执行报告"""
@@ -209,30 +284,18 @@ class Harness:
             print(f"  💾 Saved: {filepath}")
     
     def _format_output(self, output: NoteOutput, result: Dict) -> str:
-        """格式化输出内容"""
-        lines = [
-            f"---",
-            f"title: {output.title}",
-            f"tags: {json.dumps(output.tags)}",
-            f"source: {output.source}",
-            f"lumina_score: {result['best_score']}",
-            f"lumina_iterations: {result['iterations']}",
-            f"---",
-            f"",
-            output.content,
-            f"",
-            f"## Lumina Metadata",
-            f"- Generated by: Lumina v0.1.0",
-            f"- Best iteration: {result['best_round']}/{result['iterations']}",
-            f"- Quality score: {result['best_score']:.2f}",
-            f"",
-        ]
-        
-        if output.links:
-            lines.extend([
-                f"## Related",
-            ])
-            for link in output.links:
-                lines.append(f"- [[{link}]]")
-        
-        return "\n".join(lines)
+        """格式化输出内容（委托给插件渲染）"""
+        note_data = NoteData(
+            title=output.title,
+            content=output.content,
+            tags=output.tags,
+            links=output.links,
+            source=output.source,
+            metadata={
+                **output.metadata,
+                "score": result["best_score"],
+                "lumina_iterations": result["iterations"],
+                "lumina_best_round": result["best_round"],
+            },
+        )
+        return self.plugin.format(note_data)
