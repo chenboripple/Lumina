@@ -144,6 +144,8 @@ class MyPlugin(BasePlugin):
 
 编辑 `config/lumina.yaml`：
 
+### 基础配置
+
 ```yaml
 harness:
   max_iterations: 3        # 最大迭代轮数
@@ -157,6 +159,84 @@ llm:
 output:
   plugin: plain           # 输出格式插件（obsidian / plain）
   vault_path: ~/Obsidian/Vault  # Obsidian 仓库路径
+```
+
+### 高级配置：各 Agent 使用不同 LLM
+
+Lumina 支持为 Planner、Executor、Validator 三个 Agent 分别配置不同的 LLM：
+
+```yaml
+# 默认 LLM 配置（所有 Agent 共用）
+llm:
+  provider: openai
+  model: gpt-4
+  temperature: 0.3
+
+# Planner 专用配置 - 规划阶段使用更快更便宜的模型
+llm_planner:
+  provider: openai
+  model: gpt-3.5-turbo
+  temperature: 0.2
+
+# Executor 专用配置 - 笔记生成使用最强的模型
+llm_executor:
+  provider: anthropic
+  model: claude-3-sonnet-20240229
+  temperature: 0.4
+
+# Validator 专用配置 - 质量检查使用快速模型
+llm_validator:
+  provider: anthropic
+  model: claude-3-haiku-20240307
+  temperature: 0.1
+```
+
+**配置规则**：
+- 如果设置了 `llm_planner`/`llm_executor`/`llm_validator`，对应 Agent 使用专属配置
+- 如果没有设置专属配置，Agent 使用默认的 `llm` 配置
+- 所有配置项与 `llm` 结构相同，支持 `provider`、`model`、`temperature` 等参数
+
+**使用场景**：
+- **Planner**: 使用 GPT-3.5 快速规划，降低成本
+- **Executor**: 使用 GPT-4/Claude-3 Sonnet 保证笔记质量
+- **Validator**: 使用 Claude-3 Haiku 快速验证
+
+### 完整配置示例
+
+```yaml
+input:
+  sources:
+    - path: "~/Documents"
+      recursive: true
+      filter: "*.md"
+
+output:
+  plugin: obsidian
+  base_dir: "~/Lumina/Notes"
+
+harness:
+  max_iterations: 3
+  quality_threshold: 0.8
+
+llm:
+  provider: openai
+  model: gpt-4
+  temperature: 0.3
+
+llm_planner:
+  provider: openai
+  model: gpt-3.5-turbo
+  temperature: 0.2
+
+llm_executor:
+  provider: anthropic
+  model: claude-3-sonnet-20240229
+  temperature: 0.4
+
+llm_validator:
+  provider: openai
+  model: gpt-3.5-turbo
+  temperature: 0.1
 ```
 
 ## 目录结构约定
@@ -209,6 +289,130 @@ output:
   naming:
     prefix_date: false         # 不加日期前缀
     slugify: true              # 转义文件名
+```
+
+## 调试模式
+
+Lumina 提供强大的调试模式，帮助开发者排查问题和优化配置：
+
+### 启动调试模式
+
+```bash
+# 方式一：使用 CLI 命令
+python -m lumina debug
+
+# 方式二：使用启动脚本
+python lumina.py --debug
+
+# 方式三：直接运行调试模块
+python -m lumina.debug
+```
+
+### 调试功能
+
+#### 1. 单文件调试
+逐步执行 Planner → Executor → Validator，显示每个阶段的详细输出：
+
+```bash
+python lumina.py --debug test.md
+```
+
+输出内容：
+- 📄 文件分析信息（类型、大小、哈希）
+- 🎯 处理计划（策略、预估成本）
+- 📝 生成的笔记内容预览
+- ⭐ 质量验证结果（得分、问题列表）
+- 📄 最终输出预览
+- ⏱️ 各阶段耗时统计
+
+#### 2. 交互式调试
+进入交互式命令行，手动测试各组件：
+
+```bash
+python lumina.py --debug --interactive
+```
+
+可用命令：
+- `test_llm` - 测试 LLM 连接
+- `test_file` - 测试单文件处理
+- `test_config` - 验证配置
+- `show_logs` - 显示调试日志
+- `clear_logs` - 清除调试日志
+- `quit` - 退出
+
+#### 3. 测试 LLM 连接
+验证 LLM 配置是否正确：
+
+```bash
+python lumina.py --debug --test-llm
+```
+
+#### 4. 验证配置
+检查配置文件是否正确：
+
+```bash
+python lumina.py --debug --validate-config --config lumina.yaml
+```
+
+### 调试输出示例
+
+```
+============================================================
+🐛 Lumina 单文件调试模式
+============================================================
+📄 目标文件: test.md
+📏 文件大小: 1234 bytes
+
+🔍 [Step 1] Planner - 扫描文件
+🔍 [Step 2] Planner - 文件分析完成
+   Data: {
+     "type": "markdown",
+     "size": 1234,
+     "estimated_cost": 308.5,
+     "required_capabilities": []
+   }
+
+🔍 [Step 3] Planner - 制定处理计划
+🔍 [Step 4] Planner - 处理计划
+   Data: {
+     "strategy": "sequential",
+     "total_files": 1,
+     "estimated_cost": 308.5
+   }
+
+🔍 [Step 5] Executor - 开始生成笔记
+🔍 [Step 6] Executor - 笔记生成完成
+   Data: {
+     "title": "Test Document",
+     "content_length": 856,
+     "tags": ["test", "markdown"],
+     "duration": "2.34s"
+   }
+
+📝 生成内容预览:
+----------------------------------------
+# Test Document
+
+## Summary
+This is a test document...
+----------------------------------------
+
+🔍 [Step 7] Validator - 开始质量验证
+🔍 [Step 8] Validator - 验证完成
+   Data: {
+     "passed": true,
+     "score": 0.85,
+     "issues_count": 2
+   }
+
+============================================================
+📊 调试总结
+============================================================
+✅ 状态: 成功
+⏱️  总耗时: 3.45s
+⭐ 质量得分: 0.85
+🎯 验证通过: 是
+============================================================
 ```
 
 ## 核心概念

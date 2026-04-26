@@ -1,0 +1,56 @@
+# Lumina 配置示例 - 各 Agent 使用不同的 LLM
+# 
+# 配置说明：
+# - llm: 所有 Agent 共用的默认配置
+# - llm_planner: Planner 专用配置（可选）
+# - llm_executor: Executor 专用配置（可选）
+# - llm_validator: Validator 专用配置（可选）
+# 
+# 使用场景示例：
+# - Planner: 使用较快但较便宜的模型（如 GPT-3.5）快速规划
+# - Executor: 使用最强的模型（如 GPT-4）保证笔记质量
+# - Validator: 使用中等模型（如 Claude-3 Haiku）进行质量检查
+
+input:
+  sources:
+    - path: "~/Documents"
+      recursive: true
+  default_recursive: true
+  supported_extensions: [".md", ".txt", ".pdf", ".py"]
+
+output:
+  plugin: obsidian
+  base_dir: "~/Lumina/Notes"
+  vault_path: "~/Obsidian/MyVault"
+
+harness:
+  max_iterations: 3
+  quality_threshold: 0.8
+
+# 默认 LLM 配置（所有 Agent 共用）
+llm:
+  provider: openai
+  model: gpt-4
+  temperature: 0.3
+  max_tokens: 2000
+
+# Planner 专用配置 - 使用更快更便宜的模型
+llm_planner:
+  provider: openai
+  model: gpt-3.5-turbo
+  temperature: 0.2
+  max_tokens: 1000
+
+# Executor 专用配置 - 使用最强的模型保证输出质量
+llm_executor:
+  provider: anthropic
+  model: claude-3-sonnet-20240229
+  temperature: 0.4
+  max_tokens: 3000
+
+# Validator 专用配置 - 使用快速模型进行质量检查
+llm_validator:
+  provider: anthropic
+  model: claude-3-haiku-20240307
+  temperature: 0.1
+  max_tokens: 1500

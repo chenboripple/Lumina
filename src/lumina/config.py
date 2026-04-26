@@ -1,3 +1,4 @@
+
 """
 Lumina Configuration Manager
 处理配置加载、验证和优先级
@@ -6,12 +7,16 @@ Lumina Configuration Manager
 1. 环境变量（如 OPENAI_API_KEY）
 2. 用户配置文件 ~/.lumina/config.yaml
 3. 代码默认值
+
+注意：LLM 配置已迁移到 llm.py，使用 LLMConfig 和 get_llm_provider
 """
 
 import os
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
+
+from .llm import LLMConfig as LLMProviderConfig
 
 
 # 配置路径常量
@@ -99,48 +104,6 @@ class OutputConfig:
 
 
 @dataclass
-class LLMConfig:
-    """LLM 配置（含 API Key 管理）"""
-    provider: str = "openai"
-    base_url: Optional[str] = None
-    api_key: Optional[str] = None
-    model: str = "gpt-4"
-    temperature: float = 0.3
-    max_tokens: int = 2000
-    timeout: int = 60
-    max_retries: int = 3
-    retry_delay: float = 1.0
-    
-    def __post_init__(self):
-        """初始化后处理：从环境变量读取 API Key"""
-        if not self.api_key:
-            env_var = f"{self.provider.upper()}_API_KEY"
-            self.api_key = os.getenv(env_var)
-    
-    def validate(self) -> List[str]:
-        """验证 LLM 配置"""
-        errors = []
-        if not self.api_key:
-            errors.append(f"Missing API key for {self.provider} (set {self.provider.upper()}_API_KEY env var)")
-        if not self.base_url:
-            errors.append(f"Missing base URL for {self.provider}")
-        return errors
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典（排除敏感信息）"""
-        return {
-            "provider": self.provider,
-            "base_url": self.base_url,
-            "model": self.model,
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "timeout": self.timeout,
-            "max_retries": self.max_retries,
-            "retry_delay": self.retry_delay,
-        }
-
-
-@dataclass
 class LuminaConfig:
     """Lumina 完整配置"""
     
@@ -161,8 +124,11 @@ class LuminaConfig:
         "quality_threshold": 0.8,
     })
     
-    # LLM 配置
-    llm: LLMConfig = field(default_factory=LLMConfig)
+    # LLM 配置（使用 llm.py 中的 LLMConfig）
+    llm: LLMProviderConfig = field(default_factory=LLMProviderConfig)
+    llm_planner: Optional[Dict[str, Any]] = None  # Planner 专用配置
+    llm_executor: Optional[Dict[str, Any]] = None  # Executor 专用配置
+    llm_validator: Optional[Dict[str, Any]] = None  # Validator 专用配置
     
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "LuminaConfig":
@@ -206,9 +172,9 @@ class LuminaConfig:
                 filter=source.get("filter")
             ))
         
-        # 解析输出配置
+        # 输出配置
         output_data = data.get("output", {})
-        output = OutputConfig(
+        output_config = OutputConfig(
             plugin=output_data.get("plugin", "obsidian"),
             base_dir=output_data.get("base_dir", "~/Lumina/Notes"),
             vault_path=output_data.get("vault_path"),
@@ -216,9 +182,9 @@ class LuminaConfig:
             naming=output_data.get("naming", {}),
         )
         
-        # 解析 LLM 配置
+        # 解析 LLM 配置（使用 llm.py 中的 LLMConfig）
         llm_data = data.get("llm", {})
-        llm = LLMConfig(
+        llm_config = LLMProviderConfig(
             provider=llm_data.get("provider", "openai"),
             base_url=llm_data.get("base_url"),
             api_key=llm_data.get("api_key"),
@@ -230,13 +196,21 @@ class LuminaConfig:
             retry_delay=llm_data.get("retry_delay", 1.0),
         )
         
+        # 解析各 Agent 的 LLM 配置
+        planner_llm_data = data.get("llm_planner")
+        executor_llm_data = data.get("llm_executor")
+        validator_llm_data = data.get("llm_validator")
+        
         return cls(
             input_sources=sources,
             default_recursive=data.get("input", {}).get("default_recursive", True),
             supported_extensions=data.get("input", {}).get("supported_extensions", []),
-            output=output,
+            output=output_config,
             harness=data.get("harness", {}),
-            llm=llm,
+            llm=llm_config,
+            llm_planner=planner_llm_data,
+            llm_executor=executor_llm_data,
+            llm_validator=validator_llm_data,
         )
     
     def validate(self) -> List[str]:
