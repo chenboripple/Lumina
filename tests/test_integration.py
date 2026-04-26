@@ -109,7 +109,7 @@ class TestConfigChain:
         }))
 
         from lumina.config import LuminaConfig
-        lumina_config = LuminaConfig.from_yaml(str(config_file))
+        lumina_config = LuminaConfig.load(str(config_file))
 
         assert len(lumina_config.input_sources) == 1
         assert lumina_config.output.plugin == "plain"
@@ -125,7 +125,7 @@ class TestConfigChain:
         source = lumina_config.input_sources[0]
         report = harness.run(str(source.resolve_path()), source.recursive)
 
-        assert report["total_files"] == 1
+        assert report["statistics"]["total_files"] == 1
         assert output_dir.exists()
 
     def test_config_validation_rejects_missing_path(self, tmp_path):
@@ -141,7 +141,7 @@ class TestConfigChain:
         }))
 
         from lumina.config import LuminaConfig
-        lumina_config = LuminaConfig.from_yaml(str(config_file))
+        lumina_config = LuminaConfig.load(str(config_file))
         errors = lumina_config.validate()
 
         assert len(errors) > 0

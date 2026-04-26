@@ -1,301 +1,863 @@
 """
-Harness - 核心协调器
-整合 Planner + Executor + Validator，实现迭代优化
+Harness - 智能核心协调器 (Agent 增强版)
+整合 Planner + Executor + Validator + Cache + History，实现完整的知识萃取 Agent 工作流
 """
 
+import json
+import time
 from pathlib import Path
 from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .planner import Planner, FileInfo
-from .executor import Executor, NoteOutput
-from .validator import Validator, ValidationResult
+from .executor import Executor, NoteOutput, ExecutionContext
+from .validator import Validator, ValidationResult, ValidationIssue
+from .cache import CacheManager
+from .history import HistoryManager, ProcessingRecord
+from .vector_store import VectorStore, KnowledgeGraph, SemanticSearchEngine
 from .plugins import get_plugin, NoteData
+from .core.multimodal_extractor import MultimodalExtractor
+from .core.file_change_tracker import FileChangeTracker
+from .utils.file_operations import (
+    write_file_with_metadata, read_file_with_metadata, FileMetadata,
+    check_write_permission, check_sensitive_content, is_file_modified
+)
 
 
 @dataclass
 class HarnessConfig:
-    """Harness 配置"""
+    """Harness 配置（增强版）"""
     max_iterations: int = 3
     quality_threshold: float = 0.8
     output_dir: str = "./output"
     vault_path: Optional[str] = None
     plugin: str = "obsidian"
+    use_cache: bool = True  # 是否使用缓存
+    incremental: bool = True  # 是否增量处理
+    parallel: bool = True  # 是否并行处理
+    max_workers: int = 4  # 并行处理线程数
+    stream_output: bool = False  # 是否流式输出进度
+    enable_history: bool = True  # 是否启用历史记录
+    quick_validation_first: bool = True  # 是否先进行快速验证
+    allow_partial: bool = True  # 是否允许部分通过的结果输出
+    metadata_prefix: str = "lumina_"  # 元数据前缀
+    enable_vector_store: bool = True  # 是否启用向量数据库
+    vector_store_persist_dir: str = "./.lumina/vector_store"  # 向量数据库存储目录
+    embedding_provider: str = "local"  # 嵌入提供者：local/openai
+    embedding_model: Optional[str] = None  # 嵌入模型名称
+    embedding_api_key: Optional[str] = None  # 嵌入 API 密钥
+    
+    # LLM 配置 - 分别为不同的 Agent 配置
+    llm_config_planner: Optional[Dict[str, Any]] = None  # Planner 的 LLM 配置
+    llm_config_executor: Optional[Dict[str, Any]] = None  # Executor 的 LLM 配置
+    llm_config_validator: Optional[Dict[str, Any]] = None  # Validator 的 LLM 配置
+    llm_config: Dict[str, Any] = field(default_factory=dict)  # 默认 LLM 配置（所有 Agent 共用）
+    
+    # 文件操作安全配置
+    enable_write_permission_check: bool = False  # 是否启用写入权限检查
+    write_permission_rules: List[str] = field(default_factory=lambda: [
+        "+**/*",  # 默认允许所有位置写入
+    ])
+    enable_sensitive_content_check: bool = True  # 是否启用敏感内容检测
+    backup_before_write: bool = True  # 写入前是否自动备份原始文件
+    
+    def get_llm_config_for(self, agent_name: str) -> Dict[str, Any]:
+        """获取指定 Agent 的 LLM 配置
+        
+        Args:
+            agent_name: 代理名称 ('planner', 'executor', 'validator')
+            
+        Returns:
+            对应 Agent 的 LLM 配置字典
+        """
+        agent_config_attr = f"llm_config_{agent_name}"
+        agent_config = getattr(self, agent_config_attr, None)
+        
+        if agent_config:
+            return agent_config
+        
+        # 如果没有单独配置，使用默认配置
+        return self.llm_config
+
+
+@dataclass
+class HarnessState:
+    """Harness 运行状态"""
+    session_id: str = field(default_factory=lambda: f"session_{int(time.time())}")
+    start_time: float = field(default_factory=time.time)
+    end_time: Optional[float] = None
+    total_files: int = 0
+    processed_files: int = 0
+    skipped_files: int = 0
+    failed_files: int = 0
+    total_iterations: int = 0
+    cache_hits: int = 0
+    cache_misses: int = 0
+    total_cost: float = 0.0
+    avg_score: float = 0.0
+    status: str = "initialized"
+    errors: List[Dict[str, Any]] = field(default_factory=list)
 
 
 class Harness:
     """
-    Harness - 知识萃取的核心控制器
+    智能核心协调器 (Agent 增强版)
     
-    职责：
-    1. 协调 Planner/Executor/Validator 三元组
-    2. 管理迭代优化循环
-    3. 处理质量阈值和终止条件
-    4. 输出最终笔记到指定位置
+    核心能力：
+    1. 🧠 完整 Agent 工作流：规划 → 执行 → 验证 → 迭代修复 → 输出
+    2. ⚡ 增量处理：只处理变化的文件，大幅提升重复运行速度
+    3. 💾 缓存集成：自动利用 LLM 缓存，降低成本
+    4. 📜 历史记录：完整记录处理过程，支持审计和回溯
+    5. 🔄 智能迭代：基于验证反馈自动修复，直到达到质量阈值
+    6. 🚀 并行处理：多线程并发处理，提升批量处理速度
+    7. 📊 实时进度：流式输出处理进度和状态
+    8. 🛡️ 容错机制：处理失败时优雅降级，不影响整体流程
     
-    工作流程：
+    增强工作流程：
     ```
-    扫描 → 规划 → 执行 → 验证 → [修复] → 输出
-              ↑_________________↓
-              (最多3轮迭代)
+    扫描 → 增量过滤 → 规划 → [缓存检查] → 执行 → 验证 → [修复] → 输出 → 历史记录
+            ↑                                                                 ↑
+            └─────────────────────────────────────────────────────────────────┘
     ```
     """
     
     def __init__(self, config: HarnessConfig = None):
         self.config = config or HarnessConfig()
+        self.state = HarnessState()
         
-        # 初始化三元组
-        self.planner = Planner()
-        self.executor = Executor()
-        self.validator = Validator()
+        # 初始化核心组件
+        self.cache = CacheManager() if self.config.use_cache else None
+        self.history = HistoryManager() if self.config.enable_history else None
+        self.change_tracker = FileChangeTracker()  # 文件变化追踪器
+        
+        # 初始化向量数据库
+        self.vector_store = None
+        if self.config.enable_vector_store:
+            self._init_vector_store()
+        
+        # 初始化三元组（注入依赖，各自使用独立的 LLM 配置）
+        self.planner = Planner(
+            cache_manager=self.cache, 
+            history_manager=self.history,
+            llm_config=self.config.get_llm_config_for('planner')
+        )
+        self.executor = Executor(
+            llm_config=self.config.get_llm_config_for('executor'),
+            cache_manager=self.cache,
+            history_manager=self.history
+        )
+        self.validator = Validator(
+            history_manager=self.history,
+            llm_config=self.config.get_llm_config_for('validator')
+        )
+        
+        # 初始化插件
         self.plugin = get_plugin(self.config.plugin)
         
-        # 运行状态
-        self.iteration_count = 0
-        self.best_output: Optional[NoteOutput] = None
-        self.best_score = 0.0
-        self.history: List[Dict[str, Any]] = []
+        # 运行时变量
+        self.processed_results: Dict[str, Dict[str, Any]] = {}
+    
+    def _init_vector_store(self):
+        """初始化向量数据库"""
+        try:
+            embedding_config = {
+                "provider": self.config.embedding_provider,
+                "model": self.config.embedding_model,
+                "api_key": self.config.embedding_api_key,
+            }
+            
+            self.vector_store = VectorStore(
+                collection_name="lumina_notes",
+                persist_directory=self.config.vector_store_persist_dir,
+                embedding_provider_config=embedding_config
+            )
+            self._log(f"🔮 Vector store initialized")
+        except ImportError as e:
+            self._log(f"⚠️  Vector store not available: {e}")
+            self.vector_store = None
+        except Exception as e:
+            self._log(f"⚠️  Failed to initialize vector store: {e}")
+            self.vector_store = None
+    
+    def _index_to_vector_store(self, result: Dict[str, Any]):
+        """将处理结果索引到向量数据库"""
+        if not self.vector_store or not result["final_output"]:
+            return
+        
+        try:
+            output = result["final_output"]
+            doc_id = result["source"]
+            
+            self.vector_store.add_note(
+                note_id=doc_id,
+                title=output.title,
+                content=output.content,
+                tags=output.tags,
+                source=output.source,
+                metadata={
+                    "score": result["best_score"],
+                    "iterations": result["iterations"],
+                    "session_id": self.state.session_id,
+                }
+            )
+            self._log(f"🔮 Indexed to vector store: {doc_id}")
+        except Exception as e:
+            self._log(f"⚠️  Failed to index to vector store: {e}")
+    
+    def search_notes(self, query: str, n_results: int = 5) -> List[Dict[str, Any]]:
+        """
+        语义搜索笔记
+        
+        Args:
+            query: 搜索查询
+            n_results: 返回结果数量
+            
+        Returns:
+            搜索结果列表
+        """
+        if not self.vector_store:
+            self._log("⚠️  Vector store not available")
+            return []
+        
+        try:
+            results = self.vector_store.search(query, n_results=n_results)
+            
+            formatted_results = []
+            for result in results:
+                formatted_results.append({
+                    "id": result.document.id,
+                    "title": result.document.metadata.get("title", "Unknown"),
+                    "content_preview": result.document.content[:200] + "...",
+                    "score": result.score,
+                    "tags": json.loads(result.document.metadata.get("tags", "[]")),
+                    "source": result.document.metadata.get("source", ""),
+                })
+            
+            return formatted_results
+        except Exception as e:
+            self._log(f"⚠️  Search failed: {e}")
+            return []
+    
+    def find_related_notes(self, note_id: str, min_score: float = 0.7) -> List[Dict[str, Any]]:
+        """
+        查找关联笔记
+        
+        Args:
+            note_id: 笔记 ID
+            min_score: 最小相似度阈值
+            
+        Returns:
+            关联笔记列表
+        """
+        if not self.vector_store:
+            self._log("⚠️  Vector store not available")
+            return []
+        
+        try:
+            return self.vector_store.find_related_notes(note_id, min_score)
+        except Exception as e:
+            self._log(f"⚠️  Find related failed: {e}")
+            return []
+    
+    def build_knowledge_graph(self, min_similarity: float = 0.7) -> Dict[str, Any]:
+        """
+        构建知识图谱
+        
+        Args:
+            min_similarity: 最小相似度阈值
+            
+        Returns:
+            知识图谱数据
+        """
+        if not self.vector_store:
+            self._log("⚠️  Vector store not available")
+            return {"nodes": [], "edges": [], "stats": {"total_nodes": 0, "total_edges": 0}}
+        
+        try:
+            kg = KnowledgeGraph(self.vector_store)
+            return kg.build_graph(min_similarity)
+        except Exception as e:
+            self._log(f"⚠️  Build knowledge graph failed: {e}")
+            return {"nodes": [], "edges": [], "stats": {"total_nodes": 0, "total_edges": 0}}
+    
+    def get_vector_stats(self) -> Dict[str, Any]:
+        """获取向量数据库统计"""
+        if not self.vector_store:
+            return {"available": False}
+        
+        return {
+            "available": True,
+            **self.vector_store.get_stats()
+        }
     
     def run(self, input_path: str, recursive: bool = True) -> Dict[str, Any]:
         """
-        执行完整 Harness 流程
+        执行完整 Harness 流程（Agent 增强版）
         
         Args:
             input_path: 输入文件或目录
             recursive: 是否递归扫描
             
         Returns:
-            执行结果报告
+            详细执行结果报告
         """
-        print(f"🔍 Lumina Harness v0.1.0")
-        print(f"📂 Scanning: {input_path}")
+        self.state.status = "running"
+        self._log_start()
         
-        # Phase 1: 规划
-        files = self.planner.scan(input_path, recursive)
-        plan = self.planner.plan(files)
-        
-        print(f"📊 Found {plan['total_files']} files")
-        print(f"🎯 Strategy: {plan['strategy']}")
-        
-        # Phase 2-4: 执行 → 验证 → 迭代
-        results = []
-        for batch_idx, batch in enumerate(plan['batches']):
-            print(f"\n📦 Processing batch {batch_idx + 1}/{len(plan['batches'])}")
+        try:
+            # Phase 1: 扫描 & 规划
+            self._log("📂 Phase 1: Scanning & Planning")
+            files = self.planner.scan(input_path, recursive)
+            self.state.total_files = len(files)
+            self._log(f"📊 Found {len(files)} files total")
             
-            for file_info in batch:
+            # 增量过滤（只处理变化的文件）
+            if self.config.incremental and self.history:
+                files = self._filter_incremental(files)
+                self._log(f"⚡ {len(files)} files need processing (incremental mode)")
+            
+            if not files:
+                self._log("✅ No files need processing, exiting")
+                return self._generate_final_report([])
+            
+            # 生成处理计划
+            plan = self.planner.plan(files)
+            self._log(f"🎯 Processing strategy: {plan.strategy}")
+            self._log(f"📦 Total batches: {len(plan.batches)}")
+            
+            # Phase 2-4: 执行 → 验证 → 迭代
+            self._log("\n🚀 Phase 2: Processing files")
+            results = self._process_batches(plan)
+            
+            # Phase 5: 输出结果
+            self._log("\n💾 Phase 3: Saving outputs")
+            self._save_outputs(results)
+            
+            # Phase 6: 记录历史
+            if self.history:
+                self._record_history(results)
+            
+            # 生成最终报告
+            self.state.status = "completed"
+            final_report = self._generate_final_report(results)
+            self._log_final_results(final_report)
+            
+            return final_report
+            
+        except Exception as e:
+            self.state.status = "failed"
+            self.state.errors.append({"type": "system_error", "message": str(e)})
+            self._log(f"❌ System error: {e}", level="error")
+            raise
+    
+    def _filter_incremental(self, files: List[FileInfo]) -> List[FileInfo]:
+        """过滤出需要增量处理的文件（基于内容哈希检测）"""
+        files_to_process = []
+        
+        for file_info in files:
+            # 使用 FileChangeTracker 检查文件内容是否发生变化
+            try:
+                changed, fingerprint = self.change_tracker.has_file_changed(file_info.path, force_check_content=False)
+                if changed:
+                    files_to_process.append(file_info)
+                    self._log(f"🔄 Needs processing: {file_info.path} (content changed)")
+                else:
+                    # 文件未变化，跳过
+                    self.state.skipped_files += 1
+                    self._log(f"⏭️  Skipped: {file_info.path} (content unchanged)")
+            except Exception as e:
+                # 如果检测失败，默认处理该文件
+                self._log(f"⚠️  Failed to check changes for {file_info.path}: {e}, processing anyway", level="warning")
+                files_to_process.append(file_info)
+        
+        return files_to_process
+    
+    def _process_batches(self, plan) -> List[Dict[str, Any]]:
+        """处理所有批次"""
+        results = []
+        
+        for batch_idx, batch in enumerate(plan.batches):
+            self._log(f"\n📦 Processing batch {batch_idx + 1}/{len(plan.batches)} "
+                     f"({len(batch)} files)")
+            
+            batch_start = time.time()
+            
+            if self.config.parallel and len(batch) > 1:
+                # 并行处理批次
+                batch_results = self._process_batch_parallel(batch, plan)
+            else:
+                # 串行处理批次
+                batch_results = self._process_batch_serial(batch, plan)
+            
+            results.extend(batch_results)
+            
+            batch_duration = time.time() - batch_start
+            self._log(f"✅ Batch completed in {batch_duration:.1f}s")
+        
+        return results
+    
+    def _process_batch_serial(self, batch: List[FileInfo], plan) -> List[Dict[str, Any]]:
+        """串行处理批次"""
+        results = []
+        for file_info in batch:
+            try:
                 result = self._process_single(file_info, plan)
                 results.append(result)
-        
-        # Phase 5: 输出
-        output_report = self._generate_report(results)
-        self._save_outputs(results)
-        
-        return output_report
+                self.state.processed_files += 1
+            except Exception as e:
+                self.state.failed_files += 1
+                error_msg = f"Failed to process {file_info.path}: {e}"
+                self.state.errors.append({"file": str(file_info.path), "error": str(e)})
+                self._log(f"❌ {error_msg}", level="error")
+        return results
     
-    def _process_single(self, file_info: FileInfo, plan: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        处理单个文件，包含迭代优化
+    def _process_batch_parallel(self, batch: List[FileInfo], plan) -> List[Dict[str, Any]]:
+        """并行处理批次"""
+        results = []
         
-        Returns:
-            处理结果（含迭代历史）
+        with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
+            futures = {executor.submit(self._process_single, file_info, plan): file_info 
+                      for file_info in batch}
+            
+            for future in as_completed(futures):
+                file_info = futures[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    self.state.processed_files += 1
+                except Exception as e:
+                    self.state.failed_files += 1
+                    error_msg = f"Failed to process {file_info.path}: {e}"
+                    self.state.errors.append({"file": str(file_info.path), "error": str(e)})
+                    self._log(f"❌ {error_msg}", level="error")
+        
+        return results
+    
+    def _process_single(self, file_info: FileInfo, plan) -> Dict[str, Any]:
         """
-        self.iteration_count = 0
-        current_output = None
-        last_validation: Optional[ValidationResult] = None
+        处理单个文件，包含完整的迭代优化流程
+        
+        流程：
+        1. 检查缓存 → 命中则直接返回
+        2. 生成初始版本
+        3. 快速验证（可选）→ 快速过滤低质量
+        4. 完整验证 → 生成修复建议
+        5. 迭代修复 → 直到达到阈值或最大迭代次数
+        6. 选择最佳版本 → 输出
+        """
+        file_start = time.time()
+        file_path_str = str(file_info.path)
+        self._log(f"\n📄 Processing: {file_path_str}")
         
         iteration_history = []
+        all_outputs = []
+        best_output: Optional[NoteOutput] = None
+        best_score = 0.0
+        best_validation: Optional[ValidationResult] = None
         
+        # Step 1: 检查缓存
+        if self.config.use_cache and self.cache:
+            cached_result = self.cache.get_processed_result(file_info.hash)
+            if cached_result:
+                self._log(f"💾 Cache hit! Using cached result")
+                self.state.cache_hits += 1
+                cached_data = json.loads(cached_result)
+                return {
+                    "source": file_path_str,
+                    "cached": True,
+                    "best_score": cached_data["score"],
+                    "final_output": NoteOutput(**cached_data["output"]),
+                    "processing_time": 0,
+                }
+            self.state.cache_misses += 1
+        
+        # Step 2: 迭代处理
         for iteration in range(self.config.max_iterations):
-            self.iteration_count += 1
+            iter_start = time.time()
+            self.state.total_iterations += 1
             
-            # 执行
+            # 构建执行上下文
+            context = ExecutionContext(
+                session_id=self.state.session_id,
+                file_info=file_info,
+                plan=plan,
+                iteration=iteration,
+                previous_output=best_output,
+                previous_validation=best_validation,
+            )
+            
+            # 执行（生成/修复内容）
             if iteration == 0:
-                current_output = self.executor.execute(file_info, plan)
+                current_output = self.executor.execute(context)
             else:
-                # 基于反馈修复（传入完整验证结果）
-                current_output = self._revise_output(current_output, last_validation)
+                current_output = self.executor.revise(context)
             
-            # 验证
-            last_validation = self.validator.validate(current_output)
+            all_outputs.append(current_output)
             
-            # 记录
-            iteration_history.append({
+            # 快速验证（只检查基础规则，不调用 LLM）
+            if iteration == 0 and self.config.quick_validation_first:
+                quick_validation = self.validator.validate_quick(current_output)
+                if not quick_validation.passed and quick_validation.score < 0.5:
+                    self._log(f"⚠️  Quick validation failed (score={quick_validation.score:.2f}), "
+                             f"re-trying with better prompt")
+                    # 可以在这里调整提示词重试
+                    # 暂时继续完整流程
+            else:
+                quick_validation = None
+            
+            # 完整验证
+            validation = self.validator.validate(current_output, file_info, context)
+            
+            # 记录迭代结果
+            iteration_result = {
                 "round": iteration + 1,
                 "output": {
                     "title": current_output.title,
                     "content_length": len(current_output.content),
                     "tags": current_output.tags,
+                    "links": current_output.links,
                 },
                 "validation": {
-                    "score": last_validation.score,
-                    "passed": last_validation.passed,
-                    "issues": len(last_validation.issues),
-                }
-            })
+                    "score": validation.score,
+                    "passed": validation.passed,
+                    "issue_count": len(validation.issues),
+                    "error_count": len([i for i in validation.issues if i.severity == "error"]),
+                    "warning_count": len([i for i in validation.issues if i.severity == "warning"]),
+                },
+                "duration": time.time() - iter_start,
+            }
+            iteration_history.append(iteration_result)
             
-            print(f"  Round {iteration + 1}: score={last_validation.score:.2f}, passed={last_validation.passed}")
+            # 更新最佳结果
+            if validation.score > best_score:
+                best_score = validation.score
+                best_output = current_output
+                best_validation = validation
+                self._log(f"✨ Round {iteration + 1}: NEW BEST score={best_score:.2f}, "
+                         f"passed={validation.passed}, issues={len(validation.issues)}")
+            else:
+                self._log(f"🔄 Round {iteration + 1}: score={validation.score:.2f}, "
+                         f"passed={validation.passed}, issues={len(validation.issues)}")
             
             # 检查终止条件
-            if last_validation.passed and last_validation.score >= self.config.quality_threshold:
-                print(f"  ✅ Quality threshold reached!")
+            if validation.passed and validation.score >= self.config.quality_threshold:
+                self._log(f"✅ Quality threshold reached!")
                 break
             
-            if not last_validation.suggestions:
-                print(f"  ⚠️  No suggestions for improvement, stopping")
+            if iteration == self.config.max_iterations - 1:
+                self._log(f"⚠️  Max iterations reached, stopping")
+                break
+            
+            if not validation.suggestions:
+                self._log(f"⚠️  No suggestions for improvement, stopping")
                 break
         
-        # 选择最佳输出
-        best_iteration = max(iteration_history, key=lambda x: x['validation']['score'])
+        # Step 3: 处理最终结果
+        final_passed = (best_validation.passed if best_validation else False) or self.config.allow_partial
         
-        return {
-            "source": str(file_info.path),
-            "iterations": len(iteration_history),
-            "best_round": best_iteration['round'],
-            "best_score": best_iteration['validation']['score'],
-            "final_output": current_output,
-            "history": iteration_history,
-        }
-    
-    def _revise_output(self, current: NoteOutput, prev_validation: ValidationResult) -> NoteOutput:
-        """
-        基于验证反馈修复输出
+        if not final_passed:
+            self._log(f"❌ Processing failed, quality did not meet threshold")
+            self.state.failed_files += 1
+        else:
+            self._log(f"✅ Processing complete, best score={best_score:.2f}")
         
-        将 Validator 的 suggestions 和 issues 注入提示词，
-        调用 LLM 修复内容。
-        """
-        # 构建修复提示词
-        fix_prompt = self._build_fix_prompt(current, prev_validation)
+        processing_duration = time.time() - file_start
         
-        # 调用 LLM 修复
+        # Step 4: 缓存结果
+        if self.config.use_cache and self.cache and best_output:
+            cache_data = {
+                "score": best_score,
+                "output": {
+                    "title": best_output.title,
+                    "content": best_output.content,
+                    "tags": best_output.tags,
+                    "links": best_output.links,
+                    "source": best_output.source,
+                    "metadata": best_output.metadata,
+                    "processing_info": best_output.processing_info,
+                }
+            }
+            self.cache.set_processed_result(file_info.hash, json.dumps(cache_data))
+        
+        # Step 5: 标记文件为已处理（更新指纹）
         try:
-            llm = self.executor._get_llm()
-            fixed_content = llm.complete(fix_prompt)
-            
-            # 解析修复后的输出
-            fixed_data = json.loads(fixed_content)
-            
-            # 构建新的 NoteOutput
-            content = self.executor._to_markdown(fixed_data)
-            
-            return NoteOutput(
-                title=fixed_data.get("title", current.title),
-                content=content,
-                tags=fixed_data.get("tags", current.tags),
-                links=fixed_data.get("suggested_links", current.links),
-                source=current.source,
-                metadata={
-                    **current.metadata,
-                    "revision": True,
-                    "prev_score": prev_validation.score,
-                }
-            )
+            fingerprint = self.change_tracker.calculate_file_fingerprint(file_info.path)
+            self.change_tracker.mark_as_processed(fingerprint)
+            self._log(f"✅ Marked as processed: {file_info.path}")
         except Exception as e:
-            # 修复失败，返回原始输出
-            print(f"  ⚠️  Revision failed: {e}")
-            return current
-    
-    def _build_fix_prompt(self, current: NoteOutput, validation: ValidationResult) -> str:
-        """构建修复提示词"""
-        issues_text = "\n".join([
-            f"- [{i['severity']}] {i['type']}: {i['message']}"
-            for i in validation.issues
-        ])
+            self._log(f"⚠️  Failed to mark file as processed: {e}", level="warning")
         
-        suggestions_text = "\n".join([
-            f"- {s}"
-            for s in validation.suggestions
-        ])
-        
-        return f"""
-You are a content editor. Fix the following note based on quality feedback.
-
-## Current Content
-```
-{current.content[:2000]}
-```
-
-## Quality Issues
-{issues_text}
-
-## Fix Suggestions
-{suggestions_text}
-
-## Instructions
-1. Fix all issues listed above
-2. Keep the core information intact
-3. Improve structure and clarity
-4. Maintain the same JSON output format
-
-## Output Format
-Return JSON with this structure:
-{{
-    "title": "Improved title",
-    "summary": "Improved summary",
-    "key_points": ["improved point 1", "improved point 2"],
-    "tags": ["tag1", "tag2"],
-    "suggested_links": ["Topic A", "Topic B"],
-    "metadata": {{
-        "complexity": "simple|moderate|complex",
-        "confidence": 0.95
-    }}
-}}
-"""
-    
-    def _generate_report(self, results: List[Dict]) -> Dict[str, Any]:
-        """生成执行报告"""
-        total_files = len(results)
-        avg_iterations = sum(r['iterations'] for r in results) / total_files if total_files else 0
-        avg_score = sum(r['best_score'] for r in results) / total_files if total_files else 0
+        # 计算成本
+        exec_stats = self.executor.get_stats()
+        self.state.total_cost += exec_stats["total_cost"] / self.state.total_files if self.state.total_files else 0
         
         return {
-            "total_files": total_files,
-            "avg_iterations": avg_iterations,
-            "avg_score": avg_score,
-            "threshold": self.config.quality_threshold,
-            "results": [
-                {
-                    "source": r['source'],
-                    "iterations": r['iterations'],
-                    "best_score": r['best_score'],
-                }
-                for r in results
-            ]
+            "source": file_path_str,
+            "file_info": {
+                "path": file_path_str,
+                "size": file_info.size,
+                "type": file_info.type,
+                "modified": file_info.modified,
+                "hash": file_info.hash,
+            },
+            "processed": True,
+            "cached": False,
+            "final_passed": final_passed,
+            "iterations": len(iteration_history),
+            "best_round": iteration_history.index(max(iteration_history, key=lambda x: x['validation']['score'])) + 1,
+            "best_score": best_score,
+            "best_output": best_output,
+            "best_validation": best_validation,
+            "final_output": best_output,
+            "all_outputs": all_outputs,
+            "iteration_history": iteration_history,
+            "processing_time": processing_duration,
         }
     
     def _save_outputs(self, results: List[Dict]):
-        """保存输出到文件"""
+        """保存输出到文件（增强版：支持编码保留、权限检查、敏感信息检测）"""
         output_dir = Path(self.config.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         
+        saved_count = 0
         for result in results:
-            output = result['final_output']
-            if not output:
+            if not result["processed"] or not result["final_output"]:
                 continue
             
-            # 生成文件名
+            output = result["final_output"]
+            
+            # 生成安全文件名
             safe_title = "".join(c if c.isalnum() or c in (' ', '-') else '_' for c in output.title)
+            safe_title = safe_title.strip() or "untitled"
             filename = f"{safe_title}.md"
             filepath = output_dir / filename
             
-            # 写入文件
-            content = self._format_output(output, result)
-            filepath.write_text(content, encoding='utf-8')
+            # 避免文件名冲突
+            counter = 1
+            while filepath.exists():
+                filepath = output_dir / f"{safe_title}_{counter}.md"
+                counter += 1
             
-            print(f"  💾 Saved: {filepath}")
+            # 格式化输出内容
+            content = self._format_output(output, result)
+            
+            # 权限检查（如果配置了权限规则）
+            if hasattr(self.config, 'write_permission_rules') and self.config.write_permission_rules:
+                allowed, errors = check_write_permission(filepath, self.config.write_permission_rules)
+                if not allowed:
+                    self._log(f"❌ Permission denied for {filepath}: {errors}", level="error")
+                    self.state.errors.append({"file": str(filepath), "error": f"Permission denied: {errors}"})
+                    continue
+            
+            # 敏感信息检测
+            sensitive_issues = check_sensitive_content(content)
+            if sensitive_issues:
+                self._log(f"⚠️  Sensitive content detected in {filepath}:", level="warning")
+                for issue in sensitive_issues:
+                    self._log(f"  - {issue}", level="warning")
+                # 不阻止写入，但记录警告
+                self.state.errors.append({
+                    "file": str(filepath), 
+                    "warning": f"Sensitive content detected: {sensitive_issues}"
+                })
+            
+            # 使用增强的文件写入（保留编码和换行符）
+            try:
+                # 创建 FileMetadata（新文件使用 UTF-8 + LF）
+                metadata = FileMetadata(
+                    path=filepath,
+                    encoding='utf-8',
+                    line_endings='LF',
+                    size=len(content.encode('utf-8')),
+                    modified=0,
+                    is_symlink=False
+                )
+                
+                write_file_with_metadata(content, metadata, backup=False)
+                saved_count += 1
+                self._log(f"💾 Saved: {filepath}")
+                
+            except Exception as e:
+                self._log(f"❌ Failed to save {filepath}: {e}", level="error")
+                self.state.errors.append({"file": str(filepath), "error": str(e)})
+                continue
+            
+            # 索引到向量数据库
+            self._index_to_vector_store(result)
+        
+        self._log(f"✅ Saved {saved_count} files to {output_dir}")
     
     def _format_output(self, output: NoteOutput, result: Dict) -> str:
         """格式化输出内容（委托给插件渲染）"""
+        # 构建元数据
+        metadata = {
+            **output.metadata,
+            f"{self.config.metadata_prefix}score": result["best_score"],
+            f"{self.config.metadata_prefix}iterations": result["iterations"],
+            f"{self.config.metadata_prefix}best_round": result["best_round"],
+            f"{self.config.metadata_prefix}source": output.source,
+            f"{self.config.metadata_prefix}processed_at": datetime.now().isoformat(),
+            f"{self.config.metadata_prefix}session_id": self.state.session_id,
+        }
+        
         note_data = NoteData(
             title=output.title,
             content=output.content,
             tags=output.tags,
             links=output.links,
             source=output.source,
-            metadata={
-                **output.metadata,
-                "score": result["best_score"],
-                "lumina_iterations": result["iterations"],
-                "lumina_best_round": result["best_round"],
-            },
+            metadata=metadata,
         )
         return self.plugin.format(note_data)
+    
+    def _record_history(self, results: List[Dict]):
+        """记录处理历史"""
+        for result in results:
+            if not result["processed"] or not result["final_output"]:
+                continue
+            
+            record = ProcessingRecord(
+                session_id=self.state.session_id,
+                file_path=result["source"],
+                file_hash=result["file_info"]["hash"],
+                file_type=result["file_info"]["type"],
+                file_size=result["file_info"]["size"],
+                iterations=result["iterations"],
+                best_score=result["best_score"],
+                final_output=json.dumps(result["final_output"].__dict__),
+                full_history=json.dumps(result["iteration_history"]),
+                created_at=datetime.now().isoformat(),
+                metadata={"session_id": self.state.session_id}
+            )
+            
+            self.history.record_file_processing(record)
+    
+    def _generate_final_report(self, results: List[Dict]) -> Dict[str, Any]:
+        """生成最终执行报告"""
+        self.state.end_time = time.time()
+        total_duration = self.state.end_time - self.state.start_time
+        
+        # 计算统计数据
+        successful_results = [r for r in results if r["processed"] and r["final_output"]]
+        scores = [r["best_score"] for r in successful_results]
+        self.state.avg_score = sum(scores) / len(scores) if scores else 0.0
+        
+        cache_hit_rate = self.state.cache_hits / max(self.state.cache_hits + self.state.cache_misses, 1)
+        
+        # 生成质量分布
+        score_distribution = {
+            "A+": len([s for s in scores if s >= 0.9]),
+            "A": len([s for s in scores if 0.8 <= s < 0.9]),
+            "B": len([s for s in scores if 0.7 <= s < 0.8]),
+            "C": len([s for s in scores if 0.6 <= s < 0.7]),
+            "D": len([s for s in scores if 0.5 <= s < 0.6]),
+            "F": len([s for s in scores if s < 0.5]),
+        }
+        
+        return {
+            "session_id": self.state.session_id,
+            "status": self.state.status,
+            "config": {
+                "max_iterations": self.config.max_iterations,
+                "quality_threshold": self.config.quality_threshold,
+                "incremental": self.config.incremental,
+                "parallel": self.config.parallel,
+                "use_cache": self.config.use_cache,
+            },
+            "statistics": {
+                "start_time": datetime.fromtimestamp(self.state.start_time).isoformat(),
+                "end_time": datetime.fromtimestamp(self.state.end_time).isoformat(),
+                "total_duration": total_duration,
+                "total_files": self.state.total_files,
+                "processed_files": self.state.processed_files,
+                "skipped_files": self.state.skipped_files,
+                "failed_files": self.state.failed_files,
+                "total_iterations": self.state.total_iterations,
+                "cache_hits": self.state.cache_hits,
+                "cache_misses": self.state.cache_misses,
+                "cache_hit_rate": cache_hit_rate,
+                "estimated_total_cost": self.state.total_cost,
+                "avg_score": self.state.avg_score,
+                "score_distribution": score_distribution,
+                "pass_rate": len([r for r in results if r.get("final_passed", False)]) / max(len(results), 1),
+            },
+            "results": [
+                {
+                    "source": r['source'],
+                    "file_type": r['file_info']['type'],
+                    "file_size": r['file_info']['size'],
+                    "processed": r['processed'],
+                    "passed": r.get('final_passed', False),
+                    "iterations": r['iterations'],
+                    "best_score": r['best_score'],
+                    "processing_time": r['processing_time'],
+                }
+                for r in results
+            ],
+            "errors": self.state.errors,
+        }
+    
+    def _log(self, message: str, level: str = "info"):
+        """输出日志"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] {message}")
+    
+    def _log_start(self):
+        """记录启动信息"""
+        self._log("=" * 60)
+        self._log(f"🚀 Lumina Harness v0.2.0 (Agent Enhanced)")
+        self._log(f"🆔 Session ID: {self.state.session_id}")
+        self._log(f"⚙️  Config: max_iterations={self.config.max_iterations}, "
+                 f"quality_threshold={self.config.quality_threshold}, "
+                 f"incremental={self.config.incremental}, "
+                 f"parallel={self.config.parallel}, "
+                 f"vector_store={self.config.enable_vector_store}")
+        self._log("=" * 60)
+    
+    def _log_final_results(self, report: Dict[str, Any]):
+        """记录最终结果"""
+        stats = report["statistics"]
+        self._log("\n" + "=" * 60)
+        self._log("📊 Final Results")
+        self._log("=" * 60)
+        self._log(f"✅ Status: {report['status']}")
+        self._log(f"⏱️  Total Duration: {stats['total_duration']:.1f}s")
+        self._log(f"📂 Total Files: {stats['total_files']}")
+        self._log(f"✅ Processed: {stats['processed_files']}")
+        self._log(f"⏭️  Skipped: {stats['skipped_files']}")
+        self._log(f"❌ Failed: {stats['failed_files']}")
+        self._log(f"🔄 Total Iterations: {stats['total_iterations']}")
+        self._log(f"💾 Cache Hit Rate: {stats['cache_hit_rate']:.1%}")
+        self._log(f"⭐ Average Score: {stats['avg_score']:.2f}")
+        self._log(f"🎯 Pass Rate: {stats['pass_rate']:.1%}")
+        self._log(f"💰 Estimated Cost: ${stats['estimated_total_cost']:.4f}")
+        
+        self._log("\n📈 Score Distribution:")
+        for grade, count in stats['score_distribution'].items():
+            if count > 0:
+                bar = "█" * int(count / max(stats['score_distribution'].values(), 1) * 20)
+                self._log(f"  {grade}: {count:2d} {bar}")
+        
+        if stats['errors']:
+            self._log(f"\n⚠️  Errors ({len(stats['errors'])}):")
+            for error in stats['errors']:
+                self._log(f"  ❌ {error.get('file', 'System')}: {error.get('message', str(error))}")
+        
+        self._log("\n🎉 Processing complete!")
+        self._log("=" * 60)
+    
+    def get_state(self) -> Dict[str, Any]:
+        """获取当前运行状态"""
+        return {
+            "session_id": self.state.session_id,
+            "status": self.state.status,
+            "total_files": self.state.total_files,
+            "processed_files": self.state.processed_files,
+            "skipped_files": self.state.skipped_files,
+            "failed_files": self.state.failed_files,
+            "avg_score": self.state.avg_score,
+            "total_cost": self.state.total_cost,
+            "elapsed_time": time.time() - self.state.start_time,
+        }

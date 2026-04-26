@@ -10,6 +10,11 @@ from .planner import Planner
 from .executor import Executor
 from .validator import Validator
 from .harness import Harness
+from .vector_store import VectorStore, KnowledgeGraph, SemanticSearchEngine
+from .core.file_change_tracker import FileChangeTracker
+from .core.directory_monitor import DirectoryMonitor
+from .core.incremental_processor import IncrementalProcessor
+from .core.multimodal_extractor import MultimodalExtractor, ExtractedContent
 from .plugins import (
     BasePlugin,
     ObsidianPlugin,
@@ -30,6 +35,14 @@ __all__ = [
     "Executor",
     "Validator",
     "Harness",
+    "VectorStore",
+    "KnowledgeGraph",
+    "SemanticSearchEngine",
+    "FileChangeTracker",
+    "DirectoryMonitor",
+    "IncrementalProcessor",
+    "MultimodalExtractor",
+    "ExtractedContent",
     "BasePlugin",
     "ObsidianPlugin",
     "PlainMarkdownPlugin",

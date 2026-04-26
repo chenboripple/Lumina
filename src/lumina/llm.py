@@ -49,6 +49,19 @@ class LLMConfig:
         if not self.base_url:
             errors.append(f"Missing base URL for {self.provider}")
         return errors
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典（排除敏感信息）"""
+        return {
+            "provider": self.provider,
+            "base_url": self.base_url,
+            "model": self.model,
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+            "retry_delay": self.retry_delay,
+        }
 
 
 class BaseLLMProvider(ABC):
