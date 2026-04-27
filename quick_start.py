@@ -271,7 +271,7 @@ def main():
     if failed == 0:
         print(f"\n🎉 所有测试通过! Lumina v2.0 准备就绪!")
         print(f"\n📚 下一步:")
-        print(f"   1. 查看 TEST_GUIDE.md 了解详细使用")
+        print(f"   1. 查看 docs/test-guide.md 了解详细使用")
         print(f"   2. 运行 python3 lumina.py 启动命令行")
         print(f"   3. 编写测试文件并运行完整流程")
         return 0

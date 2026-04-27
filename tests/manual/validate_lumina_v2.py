@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 # 添加 src 目录到路径
-src_dir = Path(__file__).parent / "src"
+src_dir = Path(__file__).resolve().parents[2] / "src"
 sys.path.insert(0, str(src_dir))
 
 print("=" * 60)

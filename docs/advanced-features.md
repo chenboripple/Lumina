@@ -266,7 +266,7 @@ workspace/Lumina/
 │   └── ... (v1.0 文件)
 ├── tests/
 │   └── test_comprehensive.py         # ✅ 综合测试
-└── OPTIMIZATION_SUMMARY.md           # ✅ v1.0 优化文档
+└── docs/optimization-summary.md      # ✅ v1.0 优化文档
 ```
 
 ---

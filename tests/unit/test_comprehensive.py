@@ -306,12 +306,12 @@ llm:
         import os
         
         # 临时修改用户配置目录
-        with patch('lumina.config.USER_CONFIG_DIR', tmp_path / ".lumina"):
+        with patch('lumina.config.USER_CONFIG_FILE', tmp_path / ".lumina.yaml"):
             config = LuminaConfig()
             config.input_sources = []
             config.save_user_config()
             
-            assert (tmp_path / ".lumina" / "config.yaml").exists()
+            assert (tmp_path / ".lumina.yaml").exists()
 
 
 # ==================== Vector Store 模块测试 ====================

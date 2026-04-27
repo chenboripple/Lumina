@@ -101,7 +101,7 @@ Lumina/
 ├── lumina.py                  # 快速启动脚本（新增）
 ├── install.py
 ├── pyproject.toml
-└── readme.md
+└── README.md
 ```
 
 ## 开发流程
@@ -128,10 +128,10 @@ git commit -m "描述你的更改"
 python -m pytest tests/ -v
 
 # 运行调试模式测试
-python -m pytest tests/test_debug.py -v
+python -m pytest tests/integration/test_debug.py -v
 
 # 运行特定文件测试
-python -m pytest tests/test_integration.py -v
+python -m pytest tests/integration/test_integration.py -v
 ```
 
 ### 3. 代码格式化

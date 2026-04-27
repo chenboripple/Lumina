@@ -12,7 +12,7 @@
 **状态**: ✅ 完成
 
 **新增文件**:
-- `tests/test_comprehensive.py` - 全面的综合测试套件
+- `tests/unit/test_comprehensive.py` - 全面的综合测试套件
 
 **覆盖内容**:
 - ✅ Cache 模块测试（文件缓存、LLM 响应缓存、状态缓存）
@@ -154,8 +154,8 @@ workspace/Lumina/
 │   ├── harness.py                   # ✅ 集成所有优化
 │   └── cache.py                     # ✅ 增强：新增处理结果缓存
 ├── tests/
-│   └── test_comprehensive.py        # ✅ 新增：综合测试套件
-└── test_optimizations.py            # ✅ 新增：验证脚本
+│   ├── unit/test_comprehensive.py   # ✅ 新增：综合测试套件
+│   └── manual/validate_optimizations.py  # ✅ 新增：验证脚本
 ```
 
 ---

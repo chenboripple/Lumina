@@ -35,9 +35,9 @@
 7. **新增调试工具**
    - `src/lumina/debug.py` - 调试模式核心
    - `lumina.py` - 快速启动脚本
-   - `DEVELOPMENT.md` - 开发指南
+   - `docs/development.md` - 开发指南
    - `.vscode/launch.json` - VS Code 调试配置
-   - `tests/test_debug.py` - 调试模式测试
+   - `tests/integration/test_debug.py` - 调试模式测试
 
 ---
 
@@ -65,17 +65,17 @@
 | `VectorStore.add_note()` / `search()` | ✅ 存在 |
 
 ### ✅ 文档完整性
-- ✅ `readme.md` - 项目说明和使用指南
-- ✅ `DEVELOPMENT.md` - 本地开发指南
-- ✅ `config/lumina.yaml` - 默认配置
+- ✅ `README.md` - 项目说明和使用指南
+   - ✅ `docs/development.md` - 本地开发指南
+- ✅ `~/.lumina.yaml` - 用户配置（位于 home 目录，不纳入项目）
 - ✅ `docs/example_config_with_separate_llm.yaml` - 多 Agent 配置示例
 
 ### ✅ 测试覆盖
-- ✅ `test_debug.py` - 调试模式测试
-- ✅ `test_planner.py` - 规划器测试
-- ✅ `test_harness.py` - Harness 测试
-- ✅ `test_validator.py` - 验证器测试
-- ✅ `test_integration.py` - 集成测试
+- ✅ `tests/integration/test_debug.py` - 调试模式测试
+- ✅ `tests/unit/test_planner.py` - 规划器测试
+- ✅ `tests/integration/test_harness.py` - Harness 测试
+- ✅ `tests/unit/test_validator.py` - 验证器测试
+- ✅ `tests/integration/test_integration.py` - 集成测试
 
 ---
 

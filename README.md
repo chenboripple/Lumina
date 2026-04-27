@@ -94,8 +94,8 @@ python install.py --update
 # 扫描目录并生成笔记
 python -m lumina scan ~/Documents --output ./notes
 
-# 使用配置文件
-python -m lumina config config/lumina.yaml
+# 使用指定配置文件
+python -m lumina config ~/.lumina.yaml
 ```
 
 ## 输出格式
@@ -142,7 +142,7 @@ class MyPlugin(BasePlugin):
 
 ## 配置
 
-编辑 `config/lumina.yaml`：
+编辑 `~/.lumina.yaml`：
 
 ### 基础配置
 

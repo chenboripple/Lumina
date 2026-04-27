@@ -34,12 +34,14 @@ workspace/Lumina/
 │       └── static/
 │           ├── css/style.css         # ✅ 样式文件
 │           └── js/app.js             # ✅ 前端逻辑
-├── tests/test_comprehensive.py       # ✅ 综合测试
-├── OPTIMIZATION_SUMMARY.md           # ✅ v1.0 文档
-├── ADVANCED_FEATURES.md              # ✅ v2.0 文档
-├── TEST_GUIDE.md                     # ✅ 测试指南
-├── quick_start.py                    # ✅ 快速启动脚本
-└── test_lumina_v2.py                 # ✅ 测试脚本
+├── tests/
+│   ├── unit/test_comprehensive.py    # ✅ 综合单元测试
+│   ├── integration/                  # ✅ 集成测试
+│   └── manual/validate_lumina_v2.py # ✅ 手动验证脚本
+├── docs/optimization-summary.md      # ✅ v1.0 文档
+├── docs/advanced-features.md         # ✅ v2.0 文档
+├── docs/test-guide.md                # ✅ 测试指南
+└── quick_start.py                    # ✅ 快速启动脚本
 ```
 
 ## 🚀 快速启动
@@ -61,7 +63,7 @@ python3 quick_start.py
 ### 3. 查看测试指南
 
 ```bash
-cat TEST_GUIDE.md
+cat docs/test-guide.md
 ```
 
 ## 📚 使用示例
@@ -161,7 +163,7 @@ python3 quick_start.py
 或者查看详细测试指南：
 
 ```bash
-cat TEST_GUIDE.md
+cat docs/test-guide.md
 ```
 
 ## 🎉 总结
