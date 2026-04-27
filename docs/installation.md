@@ -41,33 +41,22 @@ pip install -e ".[dev]"
 
 ### 首次使用
 
-安装后会在用户目录创建配置文件：
-
-- **macOS/Linux**: `~/.lumina/config.yaml`
-- **Windows**: `%USERPROFILE%\.lumina\config.yaml`
+安装完成后，在主目录创建配置文件 `~/.lumina.yaml`（Windows 用户为 `%USERPROFILE%\.lumina.yaml`）。
 
 ### 配置 LLM
 
-**方式 1：环境变量（推荐）**
+Lumina 通过 `~/.lumina.yaml` 管理所有配置，**不读取环境变量**，api_key 需在配置文件中显式填写。
 
-```bash
-# macOS/Linux
-export OPENAI_API_KEY="your-api-key"
-
-# Windows PowerShell
-$env:OPENAI_API_KEY="your-api-key"
-```
-
-**方式 2：配置文件**
-
-编辑 `~/.lumina/config.yaml`：
+创建 `~/.lumina.yaml`：
 
 ```yaml
 llm:
-  provider: "openai"
-  api_key: "your-api-key"
-  model: "gpt-4"
+  provider: openai
+  api_key: "sk-..."   # 必填
+  model: gpt-4
 ```
+
+完整配置字段和说明见 [docs/lumina-yaml-demo.md](lumina-yaml-demo.md)。
 
 ## 验证安装
 
