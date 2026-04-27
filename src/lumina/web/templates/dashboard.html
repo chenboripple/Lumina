@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumina - 知识管理</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/dist/vis-network.min.css">
+</head>
+<body>
+    <div class="app">
+        <!-- 导航栏 -->
+        <nav class="navbar">
+            <div class="logo">
+                <span class="logo-icon">💡</span>
+                <span class="logo-text">Lumina</span>
+            </div>
+            <div class="nav-links">
+                <button class="nav-btn active" data-view="dashboard">仪表板</button>
+                <button class="nav-btn" data-view="search">搜索</button>
+                <button class="nav-btn" data-view="graph">知识图谱</button>
+                <button class="nav-btn" data-view="notes">笔记管理</button>
+                <button class="nav-btn" data-view="config">配置</button>
+            </div>
+        </nav>
+
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 仪表板视图 -->
+            <div id="dashboard-view" class="view active">
+                <h1 class="page-title">📊 仪表板</h1>
+                
+                <!-- 统计卡片 -->
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">📝</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="stat-notes">0</div>
+                            <div class="stat-label">总笔记数</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="stat-processed">0</div>
+                            <div class="stat-label">处理文件数</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⭐</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="stat-score">0.00</div>
+                            <div class="stat-label">平均质量</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔮</div>
+                        <div class="stat-content">
+                            <div class="stat-value" id="stat-vector">0</div>
+                            <div class="stat-label">向量文档</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 处理状态 -->
+                <div class="panel">
+                    <h2 class="panel-title">📌 处理状态</h2>
+                    <div id="status-display">
+                        <p class="status-idle">等待处理...</p>
+                    </div>
+                </div>
+
+                <!-- 快速操作 -->
+                <div class="panel">
+                    <h2 class="panel-title">⚡ 快速操作</h2>
+                    <div class="quick-actions">
+                        <button class="btn btn-primary" id="btn-scan">扫描目录</button>
+                        <button class="btn btn-warning" id="btn-batch-repair">批量修复</button>
+                        <button class="btn btn-secondary" id="btn-refresh">刷新数据</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 搜索视图 -->
+            <div id="search-view" class="view">
+                <h1 class="page-title">🔍 语义搜索</h1>
+                
+                <div class="search-box">
+                    <input type="text" id="search-input" class="search-input" 
+                           placeholder="输入搜索内容...">
+                    <button class="btn btn-primary" id="btn-search">搜索</button>
+                </div>
+                
+                <div class="search-results" id="search-results">
+                    <p class="hint">输入关键词开始搜索</p>
+                </div>
+            </div>
+
+            <!-- 知识图谱视图 -->
+            <div id="graph-view" class="view">
+                <h1 class="page-title">🕸️ 知识图谱</h1>
+                
+                <div class="panel">
+                    <div class="graph-controls">
+                        <label>
+                            最小相似度:
+                            <input type="range" id="similarity-slider" min="0.5" max="0.95" step="0.05" value="0.7">
+                            <span id="similarity-value">0.7</span>
+                        </label>
+                        <button class="btn btn-secondary" id="btn-refresh-graph">刷新</button>
+                    </div>
+                    <div id="graph-container" class="graph-container"></div>
+                </div>
+            </div>
+
+            <!-- 笔记管理视图 -->
+            <div id="notes-view" class="view">
+                <h1 class="page-title">📝 笔记管理</h1>
+                
+                <div class="notes-grid" id="notes-grid">
+                    <p class="loading">加载中...</p>
+                </div>
+            </div>
+
+            <!-- 配置视图 -->
+            <div id="config-view" class="view">
+                <h1 class="page-title">⚙️ 配置</h1>
+                
+                <div class="config-form" id="config-form">
+                    <p class="loading">加载配置...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 笔记详情弹窗 -->
+    <div id="note-modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">笔记详情</h2>
+                <button class="modal-close" id="btn-close-modal">&times;</button>
+            </div>
+            <div class="modal-body" id="modal-body"></div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-close-modal-2">关闭</button>
+                <button class="btn btn-primary" id="btn-regenerate">重新生成</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div id="loading-overlay" class="overlay hidden">
+        <div class="spinner"></div>
+        <p class="loading-text">处理中...</p>
+    </div>
+
+    <!-- 通知 -->
+    <div id="toast" class="toast hidden">
+        <span id="toast-message"></span>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/vis-network@9.1.6/dist/vis-network.min.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

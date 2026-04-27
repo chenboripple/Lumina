@@ -24,7 +24,7 @@ vim ~/.lumina/config.yaml
 python -m lumina scan ~/Documents --output ~/Lumina/Notes
 
 # 使用配置文件
-python -m lumina config config/lumina.yaml
+python -m lumina config ~/.lumina.yaml
 ```
 
 ## 📖 高级功能

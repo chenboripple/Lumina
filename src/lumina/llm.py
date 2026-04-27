@@ -25,11 +25,6 @@ class LLMConfig:
     retry_delay: float = 1.0
     
     def __post_init__(self):
-        """初始化后处理：从环境变量读取缺失的配置"""
-        if not self.api_key:
-            env_var = f"{self.provider.upper()}_API_KEY"
-            self.api_key = os.getenv(env_var)
-        
         if not self.base_url:
             self.base_url = self._get_default_base_url()
     
@@ -45,9 +40,9 @@ class LLMConfig:
         """验证配置有效性"""
         errors = []
         if not self.api_key:
-            errors.append(f"Missing API key for {self.provider} (set {self.provider.upper()}_API_KEY env var)")
+            errors.append(f"Missing api_key for {self.provider} (set it in ~/.lumina.yaml)")
         if not self.base_url:
-            errors.append(f"Missing base URL for {self.provider}")
+            errors.append(f"Missing base_url for {self.provider}")
         return errors
     
     def to_dict(self) -> Dict[str, Any]:

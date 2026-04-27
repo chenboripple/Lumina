@@ -5,7 +5,12 @@
 
 import tempfile
 import os
+import sys
 from pathlib import Path
+
+# 添加 src 目录到路径
+src_dir = Path(__file__).resolve().parents[2] / "src"
+sys.path.insert(0, str(src_dir))
 
 # 导入工具系统
 from lumina.tools import init_tools, get_tool, ToolContext, ToolResult

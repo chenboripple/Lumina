@@ -1,7 +1,20 @@
 """
-utils/__init__.py - 工具模块
+Lumina 工具模块 __init__
 """
 
-from .file_utils import get_file_hash, detect_file_type
+from .progress import ProgressTracker, BatchProgressTracker, ProgressState
+from .error_handler import (
+    ErrorHandler, ErrorSeverity, ErrorRecord,
+    safe_execute, GracefulDegradation
+)
 
-__all__ = ["get_file_hash", "detect_file_type"]
+__all__ = [
+    'ProgressTracker',
+    'BatchProgressTracker',
+    'ProgressState',
+    'ErrorHandler',
+    'ErrorSeverity',
+    'ErrorRecord',
+    'safe_execute',
+    'GracefulDegradation',
+]

@@ -20,8 +20,7 @@ from .llm import LLMConfig as LLMProviderConfig
 
 
 # 配置路径常量
-USER_CONFIG_DIR = Path.home() / ".lumina"
-USER_CONFIG_FILE = USER_CONFIG_DIR / "config.yaml"
+USER_CONFIG_FILE = Path.home() / ".lumina.yaml"
 
 
 @dataclass
@@ -243,10 +242,8 @@ class LuminaConfig:
         return errors
     
     def save_user_config(self):
-        """保存当前配置到用户配置目录"""
+        """保存当前配置到 ~/.lumina.yaml"""
         import yaml
-        
-        USER_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         
         config_dict = {
             "input": {

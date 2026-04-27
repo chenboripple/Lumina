@@ -145,9 +145,9 @@ Lumina/
 
 ### 5. 编写测试
 为所有新模块编写单元测试：
-- `tests/test_planner.py`
-- `tests/test_cache.py`
-- `tests/test_history.py`
+- `tests/unit/test_planner.py`
+- `tests/unit/test_cache.py`
+- `tests/unit/test_history.py
 
 ## 📊 预期效果
 

@@ -200,7 +200,7 @@ Lumina/
 ├── pyproject.toml                 # 项目配置
 ├── requirements.txt               # 依赖列表
 ├── install.py                     # 安装脚本
-└── readme.md                      # 项目说明
+└── README.md                      # 项目说明
 ```
 
 ---
