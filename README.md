@@ -68,7 +68,8 @@ lumina debug
 2. 随后持续监听 `input.sources` 中的目录变化
 3. 检测到文件新增/修改后自动增量更新对应笔记
 4. 也可以在页面中手动触发单篇笔记重新生成
-5. 后台服务会维护 `~/.lumina/service.pid` 与 `~/.lumina/service.log`
+5. 后台服务会维护 `~/.lumina/service.pid` 与按日期拆分的 `~/.lumina/service-YYYY-MM-DD.log`
+6. 默认仅保留最近 15 天日志，可用 `service.log_retention_days` 覆盖
 
 ## 核心架构
 

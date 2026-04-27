@@ -71,6 +71,12 @@ harness:
   quality_threshold: 0.8         # 质量达标阈值（0.0 ~ 1.0）
 
 # ──────────────────────────────────────────────
+# 服务配置
+# ──────────────────────────────────────────────
+service:
+  log_retention_days: 15         # 日志保留天数（按天分文件）
+
+# ──────────────────────────────────────────────
 # LLM 配置
 # api_key 必填，不从环境变量读取
 # ──────────────────────────────────────────────
@@ -148,8 +154,8 @@ llm:
 
 ```bash
 # 使用默认路径 ~/.lumina/lumina.yaml
-lumina scan ~/Documents
+lumina start
 
 # 指定配置文件路径
-lumina --config /path/to/custom.yaml scan ~/Documents
+lumina start --config /path/to/custom.yaml
 ```

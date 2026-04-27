@@ -9,6 +9,7 @@ import signal
 import subprocess
 import sys
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
 import click
@@ -23,12 +24,42 @@ from lumina.web_interface import WebInterface
 
 SERVICE_DIR = Path.home() / ".lumina"
 SERVICE_PID_FILE = SERVICE_DIR / "service.pid"
-SERVICE_LOG_FILE = SERVICE_DIR / "service.log"
 SERVICE_META_FILE = SERVICE_DIR / "service.json"
 
 
 def _ensure_service_dir() -> None:
     SERVICE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _get_service_log_file(ts: Optional[datetime] = None) -> Path:
+    dt = ts or datetime.now()
+    return SERVICE_DIR / f"service-{dt.strftime('%Y-%m-%d')}.log"
+
+
+def _get_latest_service_log_file() -> Optional[Path]:
+    logs = sorted(SERVICE_DIR.glob("service-*.log"))
+    if not logs:
+        return None
+    return logs[-1]
+
+
+def _cleanup_old_service_logs(retention_days: int) -> None:
+    if retention_days < 0:
+        return
+
+    cutoff = datetime.now().date() - timedelta(days=retention_days)
+    for log_file in SERVICE_DIR.glob("service-*.log"):
+        date_text = log_file.stem.replace("service-", "", 1)
+        try:
+            log_date = datetime.strptime(date_text, "%Y-%m-%d").date()
+        except ValueError:
+            continue
+
+        if log_date < cutoff:
+            try:
+                log_file.unlink()
+            except OSError:
+                pass
 
 
 def _is_process_running(pid: int) -> bool:
@@ -148,6 +179,13 @@ def debug():
 def start(config, host, port, watch, initial_sync, recursive, output, threshold, parallel, vector):
     """后台启动 Lumina 常驻服务"""
 
+    lumina_config = LuminaConfig.load(config)
+    retention_raw = lumina_config.service.get("log_retention_days", 15) if isinstance(lumina_config.service, dict) else 15
+    try:
+        retention_days = max(0, int(retention_raw))
+    except (TypeError, ValueError):
+        raise click.ClickException("service.log_retention_days 必须是非负整数")
+
     existing_pid = _get_running_service_pid()
     if existing_pid:
         meta = _read_service_meta()
@@ -157,11 +195,13 @@ def start(config, host, port, watch, initial_sync, recursive, output, threshold,
         return
 
     _ensure_service_dir()
+    _cleanup_old_service_logs(retention_days)
+    log_file = _get_service_log_file()
     command = _build_serve_command(
         config, host, port, watch, initial_sync, recursive, output, threshold, parallel, vector
     )
 
-    log_handle = open(SERVICE_LOG_FILE, 'a', encoding='utf-8')
+    log_handle = open(log_file, 'a', encoding='utf-8')
     try:
         if os.name == 'nt':
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
@@ -190,7 +230,7 @@ def start(config, host, port, watch, initial_sync, recursive, output, threshold,
     if process.poll() is not None:
         _clear_service_files()
         raise click.ClickException(
-            f"后台服务启动失败，请检查日志: {SERVICE_LOG_FILE}"
+            f"后台服务启动失败，请检查日志: {log_file}"
         )
 
     SERVICE_PID_FILE.write_text(str(process.pid), encoding='utf-8')
@@ -199,14 +239,15 @@ def start(config, host, port, watch, initial_sync, recursive, output, threshold,
         "host": host,
         "port": port,
         "url": f"http://{host}:{port}",
-        "log_file": str(SERVICE_LOG_FILE),
+        "log_file": str(log_file),
+        "log_retention_days": retention_days,
         "started_at": int(time.time()),
         "command": command,
     })
 
     click.echo(f"✅ Lumina 服务已后台启动 (PID: {process.pid})")
     click.echo(f"🌐 地址: http://{host}:{port}")
-    click.echo(f"📝 日志: {SERVICE_LOG_FILE}")
+    click.echo(f"📝 日志: {log_file}")
 
 
 @cli.command()
@@ -233,8 +274,9 @@ def status():
     pid = _get_running_service_pid()
     if not pid:
         click.echo("状态: stopped")
-        if SERVICE_LOG_FILE.exists():
-            click.echo(f"日志文件: {SERVICE_LOG_FILE}")
+        latest_log = _get_latest_service_log_file()
+        if latest_log:
+            click.echo(f"最近日志: {latest_log}")
         return
 
     meta = _read_service_meta()
@@ -244,7 +286,10 @@ def status():
         click.echo(f"地址: {meta['url']}")
     if meta.get("started_at"):
         click.echo(f"启动时间戳: {meta['started_at']}")
-    click.echo(f"日志文件: {SERVICE_LOG_FILE}")
+    if meta.get("log_retention_days") is not None:
+        click.echo(f"日志保留天数: {meta['log_retention_days']}")
+    log_file = meta.get("log_file") or str(_get_service_log_file())
+    click.echo(f"日志文件: {log_file}")
 
 
 @cli.command()

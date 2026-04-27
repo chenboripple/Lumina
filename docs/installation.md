@@ -94,8 +94,15 @@ lumina process
 后台模式会自动管理：
 
 - PID 文件: `~/.lumina/service.pid`
-- 日志文件: `~/.lumina/service.log`
+- 日志文件: `~/.lumina/service-YYYY-MM-DD.log`
 - 元数据: `~/.lumina/service.json`
+
+日志默认只保留最近 15 天。可在 `~/.lumina/lumina.yaml` 中配置：
+
+```yaml
+service:
+   log_retention_days: 30
+```
 
 ## 跨平台注意事项
 

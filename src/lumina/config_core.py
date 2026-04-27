@@ -123,6 +123,11 @@ class LuminaConfig:
         "quality_threshold": 0.8,
     })
 
+    # 服务配置
+    service: Dict[str, Any] = field(default_factory=lambda: {
+        "log_retention_days": 15,
+    })
+
     # LLM 配置（使用 llm.py 中的 LLMConfig）
     llm: LLMProviderConfig = field(default_factory=LLMProviderConfig)
     llm_planner: Optional[Dict[str, Any]] = None  # Planner 专用配置
@@ -207,12 +212,16 @@ class LuminaConfig:
         executor_llm_data = data.get("llm_executor")
         validator_llm_data = data.get("llm_validator")
 
+        service_data = {"log_retention_days": 15}
+        service_data.update(data.get("service", {}))
+
         return cls(
             input_sources=sources,
             default_recursive=data.get("input", {}).get("default_recursive", True),
             supported_extensions=data.get("input", {}).get("supported_extensions", []),
             output=output_config,
             harness=data.get("harness", {}),
+            service=service_data,
             llm=llm_config,
             llm_planner=planner_llm_data,
             llm_executor=executor_llm_data,
@@ -274,6 +283,7 @@ class LuminaConfig:
             },
             "llm": self.llm.to_dict(),
             "harness": self.harness,
+            "service": self.service,
         }
 
         USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
