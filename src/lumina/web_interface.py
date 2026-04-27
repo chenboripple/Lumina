@@ -35,7 +35,7 @@ class WebInterface:
     6. 📈 实时监控 - 处理进度、日志
     """
     
-    def __init__(self, harness=None, host='0.0.0.0', port=5000):
+    def __init__(self, harness=None, host='0.0.0.0', port=5088):
         self.harness = harness
         self.host = host
         self.port = port
@@ -373,7 +373,7 @@ class WebInterfaceConfig:
     
     def __init__(self):
         self.host = '0.0.0.0'
-        self.port = 5000
+        self.port = 5088
         self.debug = False
         self.auth_enabled = False
         self.auth_username = 'admin'

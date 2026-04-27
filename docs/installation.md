@@ -82,7 +82,7 @@ lumina status
 lumina stop
 
 # 默认打开 Web 管理界面
-# http://127.0.0.1:5000
+# http://127.0.0.1:5088
 
 # 前台调试模式（保留）
 lumina serve
