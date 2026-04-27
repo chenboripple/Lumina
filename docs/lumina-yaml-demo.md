@@ -1,6 +1,6 @@
-# ~/.lumina.yaml 配置参考
+# ~/.lumina/lumina.yaml 配置参考
 
-Lumina 的所有配置通过用户主目录下的 `~/.lumina.yaml` 文件管理，不在项目目录内存放任何配置。
+Lumina 的所有配置通过用户主目录下的 `~/.lumina/lumina.yaml` 文件管理，不在项目目录内存放任何配置。
 
 > 本文件为完整配置示例，包含所有可用字段和说明。实际使用时只需保留需要修改的字段，其余字段会使用代码默认值。
 
@@ -147,7 +147,7 @@ llm:
 ## 配置生效方式
 
 ```bash
-# 使用默认路径 ~/.lumina.yaml
+# 使用默认路径 ~/.lumina/lumina.yaml
 lumina scan ~/Documents
 
 # 指定配置文件路径

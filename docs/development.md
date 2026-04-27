@@ -147,7 +147,7 @@ flake8 src/
 ## 常见问题
 
 ### Q: 调试模式看不到 LLM 响应？
-A: 确保在 `~/.lumina.yaml` 中配置了 API key：
+A: 确保在 `~/.lumina/lumina.yaml` 中配置了 API key：
 ```yaml
 llm:
   provider: openai

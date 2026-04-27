@@ -40,7 +40,7 @@ class LLMConfig:
         """验证配置有效性"""
         errors = []
         if not self.api_key:
-            errors.append(f"Missing api_key for {self.provider} (set it in ~/.lumina.yaml)")
+            errors.append(f"Missing api_key for {self.provider} (set it in ~/.lumina/lumina.yaml)")
         if not self.base_url:
             errors.append(f"Missing base_url for {self.provider}")
         return errors

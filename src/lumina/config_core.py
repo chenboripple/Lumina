@@ -4,7 +4,7 @@ Lumina Configuration Manager
 
 配置优先级（从高到低）：
 1. 指定配置文件（命令行传入 config_path）
-2. 用户配置文件 ~/.lumina.yaml
+2. 用户配置文件 ~/.lumina/lumina.yaml
 3. 代码默认值
 
 注意：LLM 配置已迁移到 llm.py，使用 LLMConfig 和 get_llm_provider
@@ -19,7 +19,8 @@ from .llm import LLMConfig as LLMProviderConfig
 
 
 # 配置路径常量
-USER_CONFIG_FILE = Path.home() / ".lumina.yaml"
+USER_CONFIG_DIR = Path.home() / ".lumina"
+USER_CONFIG_FILE = USER_CONFIG_DIR / "lumina.yaml"
 
 
 @dataclass
@@ -135,7 +136,7 @@ class LuminaConfig:
 
         优先级：
         1. 指定配置文件（config_path）
-        2. 用户配置文件 ~/.lumina.yaml
+        2. 用户配置文件 ~/.lumina/lumina.yaml
         3. 代码默认值
 
         Args:
@@ -154,6 +155,7 @@ class LuminaConfig:
 
         # 2. 首次使用时自动创建空白用户配置文件
         if not config_path and not target_config_file.exists():
+            target_config_file.parent.mkdir(parents=True, exist_ok=True)
             target_config_file.write_text("", encoding="utf-8")
 
         # 3. 加载用户配置
@@ -247,7 +249,7 @@ class LuminaConfig:
         return errors
 
     def save_user_config(self):
-        """保存当前配置到 ~/.lumina.yaml"""
+        """保存当前配置到 ~/.lumina/lumina.yaml"""
         import yaml
 
         config_dict = {
@@ -274,5 +276,6 @@ class LuminaConfig:
             "harness": self.harness,
         }
 
+        USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(USER_CONFIG_FILE, 'w') as f:
             yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)

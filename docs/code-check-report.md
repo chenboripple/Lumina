@@ -67,7 +67,7 @@
 ### ✅ 文档完整性
 - ✅ `README.md` - 项目说明和使用指南
    - ✅ `docs/development.md` - 本地开发指南
-- ✅ `~/.lumina.yaml` - 用户配置（位于 home 目录，不纳入项目）
+- ✅ `~/.lumina/lumina.yaml` - 用户配置（位于 home 目录，不纳入项目）
 - ✅ `docs/example_config_with_separate_llm.yaml` - 多 Agent 配置示例
 
 ### ✅ 测试覆盖

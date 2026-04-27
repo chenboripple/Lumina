@@ -299,7 +299,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
     else:
         if not lumina_config.input_sources:
             raise click.ClickException(
-                "未提供 path，且 ~/.lumina.yaml 中未配置 input.sources。"
+                "未提供 path，且 ~/.lumina/lumina.yaml 中未配置 input.sources。"
                 "请传入目录路径或先配置 input.sources。"
             )
         for source in lumina_config.input_sources:
@@ -367,7 +367,7 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
 
     if not lumina_config.input_sources:
         raise click.ClickException(
-            "~/.lumina.yaml 中未配置 input.sources，无法启动常驻服务。"
+            "~/.lumina/lumina.yaml 中未配置 input.sources，无法启动常驻服务。"
         )
 
     harness_config = HarnessConfig(

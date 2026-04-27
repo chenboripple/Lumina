@@ -11,9 +11,9 @@ pip install -r requirements.txt
 
 ### 初始化配置
 ```bash
-# 安装后会自动创建 ~/.lumina.yaml（若不存在）
+# 安装后会自动创建 ~/.lumina/lumina.yaml（若不存在）
 # 手动编辑配置文件
-vim ~/.lumina.yaml
+vim ~/.lumina/lumina.yaml
 ```
 
 ### 基础使用
@@ -134,7 +134,7 @@ python -m lumina scan ~/Documents --dry-run
 
 ### 完整配置示例
 ```yaml
-# ~/.lumina.yaml
+# ~/.lumina/lumina.yaml
 
 # LLM 配置
 llm:

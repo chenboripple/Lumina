@@ -142,7 +142,7 @@ def uninstall_lumina(remove_config: bool = False):
         ])
         print("✅ Lumina 已卸载")
 
-        config_file = Path.home() / ".lumina.yaml"
+        config_file = Path.home() / ".lumina" / "lumina.yaml"
         if remove_config and config_file.exists():
             config_file.unlink()
             print(f"✅ 已删除配置文件: {config_file}")
@@ -156,14 +156,15 @@ def uninstall_lumina(remove_config: bool = False):
 
 
 def create_config():
-    """创建空白用户配置文件 ~/.lumina.yaml"""
-    config_file = Path.home() / ".lumina.yaml"
+    """创建空白用户配置文件 ~/.lumina/lumina.yaml"""
+    config_file = Path.home() / ".lumina" / "lumina.yaml"
     
     if config_file.exists():
         print(f"⚠️  配置文件已存在: {config_file}")
         return True
 
     print("\n⚙️  创建空白配置文件...")
+    config_file.parent.mkdir(parents=True, exist_ok=True)
     # 空白 YAML 文件，实际字段由用户按需填写。
     config_file.write_text("", encoding='utf-8')
     print(f"✅ 配置文件创建: {config_file}")
@@ -197,7 +198,7 @@ def main():
     parser.add_argument("--update", action="store_true", help="更新到最新版本")
     parser.add_argument("--version", action="store_true", help="检查版本")
     parser.add_argument("--uninstall", action="store_true", help="卸载 Lumina")
-    parser.add_argument("--remove-config", action="store_true", help="卸载时删除 ~/.lumina.yaml")
+    parser.add_argument("--remove-config", action="store_true", help="卸载时删除 ~/.lumina/lumina.yaml")
     args = parser.parse_args()
     
     if args.version:
@@ -237,7 +238,7 @@ def main():
     print("\n快速开始:")
     print("   lumina serve")
     print("\n配置文件:")
-    print(f"   {Path.home() / '.lumina.yaml'}")
+    print(f"   {Path.home() / '.lumina' / 'lumina.yaml'}")
     print("\n更新命令:")
     print("   python install.py --update")
     print("\n卸载命令:")

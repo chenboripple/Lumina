@@ -358,7 +358,7 @@ class LuminaDebugger:
                         self.debug_single_file(file_path)
                 
                 elif command == "test_config":
-                    config_path = input("配置文件路径 [~/.lumina.yaml]: ").strip()
+                    config_path = input("配置文件路径 [~/.lumina/lumina.yaml]: ").strip()
                     if config_path:
                         config = LuminaConfig.load(config_path)
                     else:
