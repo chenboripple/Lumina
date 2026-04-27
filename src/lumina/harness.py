@@ -20,10 +20,13 @@ from .vector_store import VectorStore, KnowledgeGraph, SemanticSearchEngine
 from .plugins import get_plugin, NoteData
 from .core.multimodal_extractor import MultimodalExtractor
 from .core.file_change_tracker import FileChangeTracker
+from .utils.progress import ProgressTracker, BatchProgressTracker
+from .utils.error_handler import ErrorHandler, ErrorSeverity, GracefulDegradation
 from .utils.file_operations import (
     write_file_with_metadata, read_file_with_metadata, FileMetadata,
     check_write_permission, check_sensitive_content, is_file_modified
 )
+
 
 
 @dataclass
@@ -48,6 +51,10 @@ class HarnessConfig:
     embedding_provider: str = "local"  # 嵌入提供者：local/openai
     embedding_model: Optional[str] = None  # 嵌入模型名称
     embedding_api_key: Optional[str] = None  # 嵌入 API 密钥
+    enable_progress: bool = True  # 是否启用进度可视化
+    enable_error_handler: bool = True  # 是否启用错误处理增强
+    progress_callback: Optional[Any] = None  # 进度回调函数
+    error_handler: Optional[Any] = None  # 错误处理器实例
     
     # LLM 配置 - 分别为不同的 Agent 配置
     llm_config_planner: Optional[Dict[str, Any]] = None  # Planner 的 LLM 配置
@@ -156,8 +163,16 @@ class Harness:
         # 初始化插件
         self.plugin = get_plugin(self.config.plugin)
         
-        # 运行时变量
-        self.processed_results: Dict[str, Dict[str, Any]] = {}
+        # 初始化错误处理器
+        self.error_handler = ErrorHandler() if self.config.enable_error_handler else None
+        
+        # 初始化进度追踪器
+        self.progress_tracker = None
+        if self.config.enable_progress:
+            self.progress_tracker = BatchProgressTracker(
+                total_files=0,  # 将在扫描后更新
+                callback=self.config.progress_callback
+            )
     
     def _init_vector_store(self):
         """初始化向量数据库"""
@@ -309,12 +324,25 @@ class Harness:
         try:
             # Phase 1: 扫描 & 规划
             self._log("📂 Phase 1: Scanning & Planning")
+            
+            # 初始化进度追踪
+            if self.progress_tracker:
+                self.progress_tracker.start_file("scanning")
+                self.progress_tracker.next_phase()
+            
             files = self.planner.scan(input_path, recursive)
             self.state.total_files = len(files)
             self._log(f"📊 Found {len(files)} files total")
             
+            # 更新进度追踪器总文件数
+            if self.progress_tracker:
+                self.progress_tracker.total_files = len(files)
+            
             # 增量过滤（只处理变化的文件）
             if self.config.incremental and self.history:
+                if self.progress_tracker:
+                    self.progress_tracker.set_phase("incremental_filter")
+                
                 files = self._filter_incremental(files)
                 self._log(f"⚡ {len(files)} files need processing (incremental mode)")
             
@@ -323,20 +351,31 @@ class Harness:
                 return self._generate_final_report([])
             
             # 生成处理计划
+            if self.progress_tracker:
+                self.progress_tracker.set_phase("planning")
+            
             plan = self.planner.plan(files)
             self._log(f"🎯 Processing strategy: {plan.strategy}")
             self._log(f"📦 Total batches: {len(plan.batches)}")
             
             # Phase 2-4: 执行 → 验证 → 迭代
             self._log("\n🚀 Phase 2: Processing files")
+            if self.progress_tracker:
+                self.progress_tracker.set_phase("processing")
+            
             results = self._process_batches(plan)
             
             # Phase 5: 输出结果
             self._log("\n💾 Phase 3: Saving outputs")
+            if self.progress_tracker:
+                self.progress_tracker.set_phase("saving")
+            
             self._save_outputs(results)
             
             # Phase 6: 记录历史
             if self.history:
+                if self.progress_tracker:
+                    self.progress_tracker.set_phase("recording_history")
                 self._record_history(results)
             
             # 生成最终报告
@@ -350,6 +389,15 @@ class Harness:
             self.state.status = "failed"
             self.state.errors.append({"type": "system_error", "message": str(e)})
             self._log(f"❌ System error: {e}", level="error")
+            
+            # 使用错误处理器处理严重错误
+            if self.error_handler:
+                self.error_handler.handle_error(
+                    e,
+                    severity=ErrorSeverity.CRITICAL,
+                    context="Harness.run"
+                )
+            
             raise
     
     def _filter_incremental(self, files: List[FileInfo]) -> List[FileInfo]:
@@ -451,170 +499,246 @@ class Harness:
         file_path_str = str(file_info.path)
         self._log(f"\n📄 Processing: {file_path_str}")
         
+        # 更新进度追踪器
+        if self.progress_tracker:
+            self.progress_tracker.start_file(file_path_str)
+        
         iteration_history = []
         all_outputs = []
         best_output: Optional[NoteOutput] = None
         best_score = 0.0
         best_validation: Optional[ValidationResult] = None
         
-        # Step 1: 检查缓存
-        if self.config.use_cache and self.cache:
-            cached_result = self.cache.get_processed_result(file_info.hash)
-            if cached_result:
-                self._log(f"💾 Cache hit! Using cached result")
-                self.state.cache_hits += 1
-                cached_data = json.loads(cached_result)
-                return {
-                    "source": file_path_str,
-                    "cached": True,
-                    "best_score": cached_data["score"],
-                    "final_output": NoteOutput(**cached_data["output"]),
-                    "processing_time": 0,
-                }
-            self.state.cache_misses += 1
-        
-        # Step 2: 迭代处理
-        for iteration in range(self.config.max_iterations):
-            iter_start = time.time()
-            self.state.total_iterations += 1
-            
-            # 构建执行上下文
-            context = ExecutionContext(
-                session_id=self.state.session_id,
-                file_info=file_info,
-                plan=plan,
-                iteration=iteration,
-                previous_output=best_output,
-                previous_validation=best_validation,
-            )
-            
-            # 执行（生成/修复内容）
-            if iteration == 0:
-                current_output = self.executor.execute(context)
-            else:
-                current_output = self.executor.revise(context)
-            
-            all_outputs.append(current_output)
-            
-            # 快速验证（只检查基础规则，不调用 LLM）
-            if iteration == 0 and self.config.quick_validation_first:
-                quick_validation = self.validator.validate_quick(current_output)
-                if not quick_validation.passed and quick_validation.score < 0.5:
-                    self._log(f"⚠️  Quick validation failed (score={quick_validation.score:.2f}), "
-                             f"re-trying with better prompt")
-                    # 可以在这里调整提示词重试
-                    # 暂时继续完整流程
-            else:
-                quick_validation = None
-            
-            # 完整验证
-            validation = self.validator.validate(current_output, file_info, context)
-            
-            # 记录迭代结果
-            iteration_result = {
-                "round": iteration + 1,
-                "output": {
-                    "title": current_output.title,
-                    "content_length": len(current_output.content),
-                    "tags": current_output.tags,
-                    "links": current_output.links,
-                },
-                "validation": {
-                    "score": validation.score,
-                    "passed": validation.passed,
-                    "issue_count": len(validation.issues),
-                    "error_count": len([i for i in validation.issues if i.severity == "error"]),
-                    "warning_count": len([i for i in validation.issues if i.severity == "warning"]),
-                },
-                "duration": time.time() - iter_start,
-            }
-            iteration_history.append(iteration_result)
-            
-            # 更新最佳结果
-            if validation.score > best_score:
-                best_score = validation.score
-                best_output = current_output
-                best_validation = validation
-                self._log(f"✨ Round {iteration + 1}: NEW BEST score={best_score:.2f}, "
-                         f"passed={validation.passed}, issues={len(validation.issues)}")
-            else:
-                self._log(f"🔄 Round {iteration + 1}: score={validation.score:.2f}, "
-                         f"passed={validation.passed}, issues={len(validation.issues)}")
-            
-            # 检查终止条件
-            if validation.passed and validation.score >= self.config.quality_threshold:
-                self._log(f"✅ Quality threshold reached!")
-                break
-            
-            if iteration == self.config.max_iterations - 1:
-                self._log(f"⚠️  Max iterations reached, stopping")
-                break
-            
-            if not validation.suggestions:
-                self._log(f"⚠️  No suggestions for improvement, stopping")
-                break
-        
-        # Step 3: 处理最终结果
-        final_passed = (best_validation.passed if best_validation else False) or self.config.allow_partial
-        
-        if not final_passed:
-            self._log(f"❌ Processing failed, quality did not meet threshold")
-            self.state.failed_files += 1
-        else:
-            self._log(f"✅ Processing complete, best score={best_score:.2f}")
-        
-        processing_duration = time.time() - file_start
-        
-        # Step 4: 缓存结果
-        if self.config.use_cache and self.cache and best_output:
-            cache_data = {
-                "score": best_score,
-                "output": {
-                    "title": best_output.title,
-                    "content": best_output.content,
-                    "tags": best_output.tags,
-                    "links": best_output.links,
-                    "source": best_output.source,
-                    "metadata": best_output.metadata,
-                    "processing_info": best_output.processing_info,
-                }
-            }
-            self.cache.set_processed_result(file_info.hash, json.dumps(cache_data))
-        
-        # Step 5: 标记文件为已处理（更新指纹）
         try:
-            fingerprint = self.change_tracker.calculate_file_fingerprint(file_info.path)
-            self.change_tracker.mark_as_processed(fingerprint)
-            self._log(f"✅ Marked as processed: {file_info.path}")
+            # Step 1: 检查缓存
+            if self.config.use_cache and self.cache:
+                cached_result = self.cache.get_processed_result(file_info.hash)
+                if cached_result:
+                    self._log(f"💾 Cache hit! Using cached result")
+                    self.state.cache_hits += 1
+                    cached_data = json.loads(cached_result)
+                    return {
+                        "source": file_path_str,
+                        "cached": True,
+                        "best_score": cached_data["score"],
+                        "final_output": NoteOutput(**cached_data["output"]),
+                        "processing_time": 0,
+                        "success": True
+                    }
+                self.state.cache_misses += 1
+            
+            # Step 2: 迭代处理
+            for iteration in range(self.config.max_iterations):
+                if self.progress_tracker:
+                    self.progress_tracker.next_phase()
+                
+                iter_start = time.time()
+                self.state.total_iterations += 1
+                
+                # 构建执行上下文
+                context = ExecutionContext(
+                    session_id=self.state.session_id,
+                    file_info=file_info,
+                    plan=plan,
+                    iteration=iteration,
+                    previous_output=best_output,
+                    previous_validation=best_validation,
+                )
+                
+                # 执行（生成/修复内容）- 使用 GracefulDegradation
+                with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context=f"Executor round {iteration+1}", handler=self.error_handler) as gd:
+                    if iteration == 0:
+                        current_output = self.executor.execute(context)
+                    else:
+                        current_output = self.executor.revise(context)
+                
+                current_output = gd.result
+                if current_output is None:
+                    self._log(f"⚠️  Failed to generate output in round {iteration+1}, skipping iteration", level="warning")
+                    if self.error_handler:
+                        self.state.errors.append({"file": file_path_str, "error": f"Failed to generate output in round {iteration+1}"})
+                    continue
+                
+                all_outputs.append(current_output)
+                
+                # 快速验证（只检查基础规则，不调用 LLM）
+                quick_validation = None
+                if iteration == 0 and self.config.quick_validation_first:
+                    with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context="Quick validation", handler=self.error_handler) as gd:
+                        quick_validation = self.validator.validate_quick(current_output)
+                    
+                    if quick_validation and not quick_validation.passed and quick_validation.score < 0.5:
+                        self._log(f"⚠️  Quick validation failed (score={quick_validation.score:.2f}), "
+                                 f"re-trying with better prompt")
+                
+                # 完整验证
+                validation = None
+                with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context="Full validation", handler=self.error_handler) as gd:
+                    validation = self.validator.validate(current_output, file_info, context)
+                
+                if validation is None:
+                    self._log(f"⚠️  Validation failed, using best so far", level="warning")
+                    validation = best_validation
+                    if not validation:
+                        # 如果没有任何验证结果，创建一个临时的
+                        from dataclasses import dataclass
+                        @dataclass
+                        class TempValidation:
+                            passed: bool = False
+                            score: float = 0.0
+                            issues: list = field(default_factory=list)
+                            suggestions: list = field(default_factory=list)
+                        validation = TempValidation()
+                
+                # 记录迭代结果
+                iteration_result = {
+                    "round": iteration + 1,
+                    "output": {
+                        "title": current_output.title,
+                        "content_length": len(current_output.content),
+                        "tags": current_output.tags,
+                        "links": current_output.links,
+                    },
+                    "validation": {
+                        "score": validation.score,
+                        "passed": validation.passed,
+                        "issue_count": len(validation.issues),
+                        "error_count": len([i for i in validation.issues if hasattr(i, 'severity') and i.severity == "error"]),
+                        "warning_count": len([i for i in validation.issues if hasattr(i, 'severity') and i.severity == "warning"]),
+                    },
+                    "duration": time.time() - iter_start,
+                }
+                iteration_history.append(iteration_result)
+                
+                # 更新最佳结果
+                if validation.score > best_score:
+                    best_score = validation.score
+                    best_output = current_output
+                    best_validation = validation
+                    self._log(f"✨ Round {iteration + 1}: NEW BEST score={best_score:.2f}, "
+                             f"passed={validation.passed}, issues={len(validation.issues)}")
+                else:
+                    self._log(f"🔄 Round {iteration + 1}: score={validation.score:.2f}, "
+                             f"passed={validation.passed}, issues={len(validation.issues)}")
+                
+                # 检查终止条件
+                if validation.passed and validation.score >= self.config.quality_threshold:
+                    self._log(f"✅ Quality threshold reached!")
+                    break
+                
+                if iteration == self.config.max_iterations - 1:
+                    self._log(f"⚠️  Max iterations reached, stopping")
+                    break
+                
+                if not validation.suggestions:
+                    self._log(f"⚠️  No suggestions for improvement, stopping")
+                    break
+            
+            # Step 3: 处理最终结果
+            final_passed = (best_validation.passed if best_validation else False) or self.config.allow_partial
+            
+            if not final_passed:
+                self._log(f"❌ Processing failed, quality did not meet threshold")
+                self.state.failed_files += 1
+            else:
+                self._log(f"✅ Processing complete, best score={best_score:.2f}")
+            
+            processing_duration = time.time() - file_start
+            
+            # Step 4: 缓存结果
+            if self.config.use_cache and self.cache and best_output:
+                cache_data = {
+                    "score": best_score,
+                    "output": {
+                        "title": best_output.title,
+                        "content": best_output.content,
+                        "tags": best_output.tags,
+                        "links": best_output.links,
+                        "source": best_output.source,
+                        "metadata": best_output.metadata,
+                        "processing_info": best_output.processing_info,
+                    }
+                }
+                self.cache.set_processed_result(file_info.hash, json.dumps(cache_data))
+            
+            # Step 5: 标记文件为已处理（更新指纹）
+            try:
+                fingerprint = self.change_tracker.calculate_file_fingerprint(file_info.path)
+                self.change_tracker.mark_as_processed(fingerprint)
+                self._log(f"✅ Marked as processed: {file_info.path}")
+            except Exception as e:
+                self._log(f"⚠️  Failed to mark file as processed: {e}", level="warning")
+                if self.error_handler:
+                    self.error_handler.handle_error(e, severity=ErrorSeverity.WARNING, context="Mark file processed")
+            
+            # 计算成本
+            exec_stats = self.executor.get_stats()
+            self.state.total_cost += exec_stats["total_cost"] / self.state.total_files if self.state.total_files else 0
+            
+            # 更新进度追踪器
+            if self.progress_tracker:
+                self.progress_tracker.file_complete({
+                    "file": file_path_str,
+                    "score": best_score,
+                    "success": final_passed
+                })
+            
+            return {
+                "source": file_path_str,
+                "file_info": {
+                    "path": file_path_str,
+                    "size": file_info.size,
+                    "type": file_info.type,
+                    "modified": file_info.modified,
+                    "hash": file_info.hash,
+                },
+                "processed": True,
+                "cached": False,
+                "final_passed": final_passed,
+                "iterations": len(iteration_history),
+                "best_round": iteration_history.index(max(iteration_history, key=lambda x: x['validation']['score'])) + 1,
+                "best_score": best_score,
+                "best_output": best_output,
+                "best_validation": best_validation,
+                "final_output": best_output,
+                "all_outputs": all_outputs,
+                "iteration_history": iteration_history,
+                "processing_time": processing_duration,
+                "success": final_passed
+            }
+            
         except Exception as e:
-            self._log(f"⚠️  Failed to mark file as processed: {e}", level="warning")
-        
-        # 计算成本
-        exec_stats = self.executor.get_stats()
-        self.state.total_cost += exec_stats["total_cost"] / self.state.total_files if self.state.total_files else 0
-        
-        return {
-            "source": file_path_str,
-            "file_info": {
-                "path": file_path_str,
-                "size": file_info.size,
-                "type": file_info.type,
-                "modified": file_info.modified,
-                "hash": file_info.hash,
-            },
-            "processed": True,
-            "cached": False,
-            "final_passed": final_passed,
-            "iterations": len(iteration_history),
-            "best_round": iteration_history.index(max(iteration_history, key=lambda x: x['validation']['score'])) + 1,
-            "best_score": best_score,
-            "best_output": best_output,
-            "best_validation": best_validation,
-            "final_output": best_output,
-            "all_outputs": all_outputs,
-            "iteration_history": iteration_history,
-            "processing_time": processing_duration,
-        }
+            self.state.failed_files += 1
+            processing_duration = time.time() - file_start
+            
+            self._log(f"❌ Critical failure processing {file_path_str}: {e}", level="error")
+            if self.error_handler:
+                self.error_handler.handle_error(e, severity=ErrorSeverity.ERROR, context=f"Process file {file_path_str}")
+                self.state.errors.append({"file": file_path_str, "error": str(e)})
+            
+            return {
+                "source": file_path_str,
+                "file_info": {
+                    "path": file_path_str,
+                    "size": file_info.size,
+                    "type": file_info.type,
+                    "modified": file_info.modified,
+                    "hash": file_info.hash,
+                },
+                "processed": False,
+                "cached": False,
+                "final_passed": False,
+                "iterations": 0,
+                "best_score": 0.0,
+                "best_output": None,
+                "best_validation": None,
+                "final_output": None,
+                "all_outputs": [],
+                "iteration_history": [],
+                "processing_time": processing_duration,
+                "success": False,
+                "error": str(e)
+            }
     
     def _save_outputs(self, results: List[Dict]):
         """保存输出到文件（增强版：支持编码保留、权限检查、敏感信息检测）"""

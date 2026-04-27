@@ -110,6 +110,20 @@ class CacheManager:
         self.stats["misses"] += 1
         return None
     
+    def get_processed_result(self, file_hash: str) -> Optional[str]:
+        """获取完整的处理结果缓存"""
+        cache_file = self.state_cache_dir / f"processed_{file_hash}.json"
+        if cache_file.exists():
+            try:
+                data = cache_file.read_text(encoding='utf-8')
+                self.stats["hits"] += 1
+                return data
+            except Exception:
+                pass
+        
+        self.stats["misses"] += 1
+        return None
+    
     def set_processing_state(self, source_path: str, state: Dict[str, Any]):
         """设置处理状态缓存"""
         state_hash = hashlib.md5(source_path.encode()).hexdigest()
@@ -117,6 +131,16 @@ class CacheManager:
         data = {
             **state,
             "updated_at": datetime.now().isoformat(),
+        }
+        cache_file.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    
+    def set_processed_result(self, file_hash: str, result: str):
+        """设置完整的处理结果缓存"""
+        cache_file = self.state_cache_dir / f"processed_{file_hash}.json"
+        data = {
+            "result": result,
+            "created_at": datetime.now().isoformat(),
+            "expires_at": (datetime.now() + timedelta(days=30)).isoformat(),
         }
         cache_file.write_text(json.dumps(data, indent=2), encoding='utf-8')
     
