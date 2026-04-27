@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import asdict
 
 from .harness import Harness, HarnessConfig
-from .config import LuminaConfig
+from .config_core import LuminaConfig
 from .planner import FileInfo, ProcessingPlan
 from .executor import NoteOutput, ExecutionContext
 from .validator import ValidationResult

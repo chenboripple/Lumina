@@ -72,18 +72,30 @@ lumina --help
 ## 快速开始
 
 ```bash
-# 启动常驻服务（推荐）
-lumina serve
+# 后台启动常驻服务（推荐）
+lumina start
+
+# 查看状态
+lumina status
+
+# 停止后台服务
+lumina stop
 
 # 默认打开 Web 管理界面
 # http://127.0.0.1:5000
 
+# 前台调试模式（保留）
+lumina serve
+
 # 一次性处理任务（可选）
 lumina process
-
-# 停止服务
-# Ctrl+C
 ```
+
+后台模式会自动管理：
+
+- PID 文件: `~/.lumina/service.pid`
+- 日志文件: `~/.lumina/service.log`
+- 元数据: `~/.lumina/service.json`
 
 ## 跨平台注意事项
 

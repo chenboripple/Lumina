@@ -39,11 +39,20 @@ llm:
 ## 使用
 
 ```bash
-# 启动常驻服务（推荐）
-lumina serve
+# 后台启动常驻服务（推荐）
+lumina start
+
+# 查看服务状态
+lumina status
+
+# 停止后台服务
+lumina stop
 
 # 打开 Web 界面
 # http://127.0.0.1:5000
+
+# 前台调试模式（保留）
+lumina serve
 
 # 一次性手动处理（可选）
 lumina process
@@ -59,6 +68,7 @@ lumina debug
 2. 随后持续监听 `input.sources` 中的目录变化
 3. 检测到文件新增/修改后自动增量更新对应笔记
 4. 也可以在页面中手动触发单篇笔记重新生成
+5. 后台服务会维护 `~/.lumina/service.pid` 与 `~/.lumina/service.log`
 
 ## 核心架构
 

@@ -4,16 +4,121 @@ CLI 命令行增强
 """
 
 import json
+import os
+import signal
+import subprocess
+import sys
+import time
 from pathlib import Path
 from typing import Optional
 import click
 from pprint import pprint
 
 from lumina.harness import Harness, HarnessConfig
-from lumina.config import LuminaConfig
+from lumina.config_core import LuminaConfig
 from lumina.core.directory_monitor import DirectoryMonitor
 from lumina.debug import run_debug_mode
 from lumina.web_interface import WebInterface
+
+
+SERVICE_DIR = Path.home() / ".lumina"
+SERVICE_PID_FILE = SERVICE_DIR / "service.pid"
+SERVICE_LOG_FILE = SERVICE_DIR / "service.log"
+SERVICE_META_FILE = SERVICE_DIR / "service.json"
+
+
+def _ensure_service_dir() -> None:
+    SERVICE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _is_process_running(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _read_service_meta() -> dict:
+    if not SERVICE_META_FILE.exists():
+        return {}
+    try:
+        return json.loads(SERVICE_META_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _write_service_meta(meta: dict) -> None:
+    _ensure_service_dir()
+    SERVICE_META_FILE.write_text(
+        json.dumps(meta, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def _clear_service_files() -> None:
+    for path in (SERVICE_PID_FILE, SERVICE_META_FILE):
+        if path.exists():
+            path.unlink()
+
+
+def _get_running_service_pid() -> Optional[int]:
+    if not SERVICE_PID_FILE.exists():
+        return None
+    try:
+        pid = int(SERVICE_PID_FILE.read_text(encoding="utf-8").strip())
+    except ValueError:
+        _clear_service_files()
+        return None
+
+    if _is_process_running(pid):
+        return pid
+
+    _clear_service_files()
+    return None
+
+
+def _build_serve_command(
+    config, host, port, watch, initial_sync, recursive, output, threshold, parallel, vector
+):
+    command = [sys.executable, "-m", "lumina", "serve", "--host", host, "--port", str(port)]
+    if config:
+        command.extend(["--config", config])
+    command.append("--watch" if watch else "--no-watch")
+    command.append("--initial-sync" if initial_sync else "--no-initial-sync")
+    if recursive:
+        command.append("--recursive")
+    if output:
+        command.extend(["--output", output])
+    if threshold is not None:
+        command.extend(["--threshold", str(threshold)])
+    command.append("--parallel" if parallel else "--no-parallel")
+    command.append("--vector" if vector else "--no-vector")
+    return command
+
+
+def _stop_pid(pid: int) -> bool:
+    try:
+        if os.name == "nt":
+            result = subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            return result.returncode == 0
+
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if not _is_process_running(pid):
+                return True
+            time.sleep(0.2)
+
+        os.kill(pid, signal.SIGKILL)
+        return not _is_process_running(pid)
+    except OSError:
+        return False
 
 
 @click.group()
@@ -27,6 +132,119 @@ def cli():
 def debug():
     """进入 Lumina 调试模式（交互式）"""
     run_debug_mode()
+
+
+@cli.command()
+@click.option('--config', '-c', type=click.Path(), help='配置文件路径')
+@click.option('--host', default='127.0.0.1', show_default=True, help='Web 服务监听地址')
+@click.option('--port', default=5000, show_default=True, type=int, help='Web 服务端口')
+@click.option('--watch/--no-watch', default=True, help='是否监听输入目录变化并自动更新')
+@click.option('--initial-sync/--no-initial-sync', default=True, help='启动时是否先按配置执行一次全量/增量处理')
+@click.option('--recursive', '-r', is_flag=True, default=False, help='覆盖配置中的递归设置')
+@click.option('--output', '-o', default=None, help='覆盖输出目录')
+@click.option('--threshold', '-t', default=None, type=float, help='质量阈值')
+@click.option('--parallel/--no-parallel', default=True, help='并行处理')
+@click.option('--vector/--no-vector', default=True, help='启用向量数据库')
+def start(config, host, port, watch, initial_sync, recursive, output, threshold, parallel, vector):
+    """后台启动 Lumina 常驻服务"""
+
+    existing_pid = _get_running_service_pid()
+    if existing_pid:
+        meta = _read_service_meta()
+        click.echo(f"⚠️  Lumina 服务已在运行 (PID: {existing_pid})")
+        if meta.get("url"):
+            click.echo(f"   地址: {meta['url']}")
+        return
+
+    _ensure_service_dir()
+    command = _build_serve_command(
+        config, host, port, watch, initial_sync, recursive, output, threshold, parallel, vector
+    )
+
+    log_handle = open(SERVICE_LOG_FILE, 'a', encoding='utf-8')
+    try:
+        if os.name == 'nt':
+            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                creationflags=creationflags,
+                close_fds=True,
+            )
+        else:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=log_handle,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+                close_fds=True,
+            )
+    finally:
+        log_handle.close()
+
+    # 启动后短暂自检，避免配置错误导致的秒退被误判为启动成功
+    time.sleep(1.0)
+    if process.poll() is not None:
+        _clear_service_files()
+        raise click.ClickException(
+            f"后台服务启动失败，请检查日志: {SERVICE_LOG_FILE}"
+        )
+
+    SERVICE_PID_FILE.write_text(str(process.pid), encoding='utf-8')
+    _write_service_meta({
+        "pid": process.pid,
+        "host": host,
+        "port": port,
+        "url": f"http://{host}:{port}",
+        "log_file": str(SERVICE_LOG_FILE),
+        "started_at": int(time.time()),
+        "command": command,
+    })
+
+    click.echo(f"✅ Lumina 服务已后台启动 (PID: {process.pid})")
+    click.echo(f"🌐 地址: http://{host}:{port}")
+    click.echo(f"📝 日志: {SERVICE_LOG_FILE}")
+
+
+@cli.command()
+def stop():
+    """停止后台 Lumina 服务"""
+
+    pid = _get_running_service_pid()
+    if not pid:
+        click.echo("ℹ️  Lumina 服务未运行")
+        return
+
+    if _stop_pid(pid):
+        _clear_service_files()
+        click.echo(f"✅ Lumina 服务已停止 (PID: {pid})")
+        return
+
+    raise click.ClickException(f"停止服务失败 (PID: {pid})")
+
+
+@cli.command()
+def status():
+    """查看 Lumina 服务运行状态"""
+
+    pid = _get_running_service_pid()
+    if not pid:
+        click.echo("状态: stopped")
+        if SERVICE_LOG_FILE.exists():
+            click.echo(f"日志文件: {SERVICE_LOG_FILE}")
+        return
+
+    meta = _read_service_meta()
+    click.echo("状态: running")
+    click.echo(f"PID: {pid}")
+    if meta.get("url"):
+        click.echo(f"地址: {meta['url']}")
+    if meta.get("started_at"):
+        click.echo(f"启动时间戳: {meta['started_at']}")
+    click.echo(f"日志文件: {SERVICE_LOG_FILE}")
 
 
 @cli.command()
