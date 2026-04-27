@@ -18,11 +18,17 @@ vim ~/.lumina.yaml
 
 ### 基础使用
 ```bash
-# 扫描目录并生成笔记
-python -m lumina process ~/Documents --output ~/Lumina/Notes
+# 启动常驻服务（推荐）
+python -m lumina serve
 
-# 使用配置文件
-python -m lumina process ~/Documents --config ~/.lumina.yaml
+# 服务启动后访问 Web 界面
+# http://127.0.0.1:5000
+
+# 一次性执行处理
+python -m lumina process
+
+# 停止服务
+# Ctrl+C
 ```
 
 ## 📖 高级功能
@@ -32,16 +38,14 @@ python -m lumina process ~/Documents --config ~/.lumina.yaml
 **场景**：每天自动更新笔记库，只处理新增/修改的文件。
 
 ```bash
-# 增量扫描（默认开启）
-python -m lumina scan ~/Documents --output ~/Lumina/Notes
-
-# 强制全量扫描
-python -m lumina scan ~/Documents --output ~/Lumina/Notes --full-scan
+# 启动常驻模式后自动监听 input.sources
+python -m lumina serve
 ```
 
 **效果**：
-- 首次扫描：处理所有文件
-- 二次扫描：只处理变化的文件，速度提升 **10~50x**
+- 启动时先执行一次初始化整理
+- 后续只处理变化的文件，速度提升 **10~50x**
+- 用户可在 Web 页面手动重生成指定笔记
 
 ### 2. 缓存管理
 

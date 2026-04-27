@@ -162,10 +162,10 @@ def create_config():
     if config_file.exists():
         print(f"⚠️  配置文件已存在: {config_file}")
         return True
-    
-        print("\n⚙️  创建空白配置文件...")
-        # 空白 YAML 文件，实际字段由用户按需填写。
-        config_file.write_text("", encoding='utf-8')
+
+    print("\n⚙️  创建空白配置文件...")
+    # 空白 YAML 文件，实际字段由用户按需填写。
+    config_file.write_text("", encoding='utf-8')
     print(f"✅ 配置文件创建: {config_file}")
     return True
 
@@ -235,7 +235,7 @@ def main():
     print("🎉 Lumina 安装完成!")
     print("="*50)
     print("\n快速开始:")
-    print("   lumina scan ~/Documents --output ./notes")
+    print("   lumina serve")
     print("\n配置文件:")
     print(f"   {Path.home() / '.lumina.yaml'}")
     print("\n更新命令:")

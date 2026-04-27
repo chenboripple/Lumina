@@ -72,11 +72,17 @@ lumina --help
 ## 快速开始
 
 ```bash
-# 扫描目录并生成笔记
-lumina scan ~/Documents --output ./notes
+# 启动常驻服务（推荐）
+lumina serve
 
-# 指定配置文件运行（可选）
-lumina process ~/Documents --config ~/.lumina.yaml
+# 默认打开 Web 管理界面
+# http://127.0.0.1:5000
+
+# 一次性处理任务（可选）
+lumina process
+
+# 停止服务
+# Ctrl+C
 ```
 
 ## 跨平台注意事项
