@@ -5,9 +5,11 @@ CLI 命令行增强
 
 import json
 import os
+import socket
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -170,7 +172,7 @@ def debug():
 @click.option('--host', default='127.0.0.1', show_default=True, help='Web 服务监听地址')
 @click.option('--port', default=5088, show_default=True, type=int, help='Web 服务端口')
 @click.option('--watch/--no-watch', default=True, help='是否监听输入目录变化并自动更新')
-@click.option('--initial-sync/--no-initial-sync', default=True, help='启动时是否先按配置执行一次全量/增量处理')
+@click.option('--initial-sync/--no-initial-sync', default=True, help='启动后是否在后台执行一次全量/增量处理')
 @click.option('--recursive', '-r', is_flag=True, default=False, help='覆盖配置中的递归设置')
 @click.option('--output', '-o', default=None, help='覆盖输出目录')
 @click.option('--threshold', '-t', default=None, type=float, help='质量阈值')
@@ -399,7 +401,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
 @click.option('--host', default='127.0.0.1', show_default=True, help='Web 服务监听地址')
 @click.option('--port', default=5088, show_default=True, type=int, help='Web 服务端口')
 @click.option('--watch/--no-watch', default=True, help='是否监听输入目录变化并自动更新')
-@click.option('--initial-sync/--no-initial-sync', default=True, help='启动时是否先按配置执行一次全量/增量处理')
+@click.option('--initial-sync/--no-initial-sync', default=True, help='启动后是否在后台执行一次全量/增量处理')
 @click.option('--recursive', '-r', is_flag=True, default=None, help='覆盖配置中的递归设置')
 @click.option('--output', '-o', default=None, help='覆盖输出目录')
 @click.option('--threshold', '-t', default=None, type=float, help='质量阈值')
@@ -451,10 +453,29 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
         click.echo(f"🔄 处理: {target_path}")
         return harness.run(str(target_path), recursive=target_recursive)
 
-    if initial_sync:
-        click.echo("🚀 启动初始化同步...")
+    def run_initial_sync_in_background():
+        click.echo("🚀 后台初始化同步开始...")
         for target_path, target_recursive in targets:
-            run_target(target_path, target_recursive)
+            try:
+                run_target(target_path, target_recursive)
+            except Exception as exc:
+                click.echo(f"❌ 初始化同步失败: {target_path} -> {exc}")
+        click.echo("✅ 后台初始化同步完成")
+
+    def _wait_for_web_ready(timeout_seconds: float = 15.0) -> bool:
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                sock.settimeout(0.5)
+                if sock.connect_ex((host, int(port))) == 0:
+                    return True
+            time.sleep(0.2)
+        return False
+
+    def run_initial_sync_after_web_ready():
+        if not _wait_for_web_ready():
+            click.echo("⚠️ Web 服务未在预期时间内就绪，仍继续后台初始化同步")
+        run_initial_sync_in_background()
 
     monitor = None
     if watch and watch_dirs:
@@ -477,6 +498,11 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
             debounce_seconds=2.0,
         )
         monitor.start()
+
+    # 严格保证先开页面：仅在检测到 Web 端口就绪后才触发初始化同步。
+    if initial_sync:
+        sync_thread = threading.Thread(target=run_initial_sync_after_web_ready, daemon=True)
+        sync_thread.start()
 
     click.echo(f"🌐 Lumina 常驻服务已启动: http://{host}:{port}")
     click.echo("💡 停止服务请按 Ctrl+C")
