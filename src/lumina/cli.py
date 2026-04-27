@@ -44,7 +44,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
     """处理文件/目录，生成结构化笔记"""
     
     # 加载配置
-    lumina_config = LuminaConfig.load(config) if config else LuminaConfig()
+    lumina_config = LuminaConfig.load(config)
     
     # 解析各 Agent 的 LLM 配置（JSON 格式）
     import json
@@ -92,7 +92,7 @@ def search(query, config, n, output):
     """语义搜索笔记"""
     
     # 加载配置
-    lumina_config = LuminaConfig.load(config) if config else LuminaConfig()
+    lumina_config = LuminaConfig.load(config)
     
     # 初始化 Harness
     harness_config = HarnessConfig(
@@ -139,7 +139,7 @@ def related(note_id, config, min_score, n):
     """查找关联笔记"""
     
     # 加载配置
-    lumina_config = LuminaConfig.load(config) if config else LuminaConfig()
+    lumina_config = LuminaConfig.load(config)
     
     # 初始化 Harness
     harness_config = HarnessConfig(
@@ -178,7 +178,7 @@ def graph(config, output, min_similarity):
     """构建知识图谱"""
     
     # 加载配置
-    lumina_config = LuminaConfig.load(config) if config else LuminaConfig()
+    lumina_config = LuminaConfig.load(config)
     
     # 初始化 Harness
     harness_config = HarnessConfig(
@@ -214,7 +214,7 @@ def stats(config):
     """显示向量数据库统计信息"""
     
     # 加载配置
-    lumina_config = LuminaConfig.load(config) if config else LuminaConfig()
+    lumina_config = LuminaConfig.load(config)
     
     # 初始化 Harness
     harness_config = HarnessConfig(

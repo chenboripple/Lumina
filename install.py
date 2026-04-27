@@ -133,45 +133,39 @@ def check_version():
         print("❌ Lumina 未安装")
 
 
+def uninstall_lumina(remove_config: bool = False):
+    """卸载 Lumina"""
+    print("\n🗑️  卸载 Lumina...")
+    try:
+        subprocess.check_call([
+            sys.executable, "-m", "pip", "uninstall", "-y", "lumina"
+        ])
+        print("✅ Lumina 已卸载")
+
+        config_file = Path.home() / ".lumina.yaml"
+        if remove_config and config_file.exists():
+            config_file.unlink()
+            print(f"✅ 已删除配置文件: {config_file}")
+        elif config_file.exists():
+            print(f"ℹ️  保留用户配置: {config_file}")
+
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 卸载失败: {e}")
+        return False
+
+
 def create_config():
-    """创建默认配置"""
-    config_dir = Path.home() / ".lumina"
-    config_file = config_dir / "config.yaml"
+    """创建空白用户配置文件 ~/.lumina.yaml"""
+    config_file = Path.home() / ".lumina.yaml"
     
     if config_file.exists():
         print(f"⚠️  配置文件已存在: {config_file}")
         return True
     
-    print("\n⚙️  创建默认配置...")
-    config_dir.mkdir(parents=True, exist_ok=True)
-    
-    default_config = """# Lumina 用户配置
-# 修改此文件以自定义 Lumina 行为
-
-input:
-  sources:
-    - path: "~/Documents"
-      recursive: true
-      filter: "*.md"
-
-output:
-  plugin: obsidian
-  base_dir: "~/Lumina/Notes"
-  vault_path: "~/Obsidian/Vault"
-
-llm:
-  provider: "openai"
-  # api_key: "your-api-key-here"
-  # 或设置环境变量: OPENAI_API_KEY
-  model: "gpt-4"
-  temperature: 0.3
-
-harness:
-  max_iterations: 3
-  quality_threshold: 0.8
-"""
-    
-    config_file.write_text(default_config, encoding='utf-8')
+        print("\n⚙️  创建空白配置文件...")
+        # 空白 YAML 文件，实际字段由用户按需填写。
+        config_file.write_text("", encoding='utf-8')
     print(f"✅ 配置文件创建: {config_file}")
     return True
 
@@ -202,6 +196,8 @@ def main():
     parser = argparse.ArgumentParser(description="Lumina 安装工具")
     parser.add_argument("--update", action="store_true", help="更新到最新版本")
     parser.add_argument("--version", action="store_true", help="检查版本")
+    parser.add_argument("--uninstall", action="store_true", help="卸载 Lumina")
+    parser.add_argument("--remove-config", action="store_true", help="卸载时删除 ~/.lumina.yaml")
     args = parser.parse_args()
     
     if args.version:
@@ -211,6 +207,12 @@ def main():
     if args.update:
         print_banner()
         update_lumina()
+        return
+
+    if args.uninstall:
+        print_banner()
+        if not uninstall_lumina(remove_config=args.remove_config):
+            sys.exit(1)
         return
     
     # 默认：安装
@@ -235,9 +237,11 @@ def main():
     print("\n快速开始:")
     print("   lumina scan ~/Documents --output ./notes")
     print("\n配置文件:")
-    print(f"   {Path.home() / '.lumina' / 'config.yaml'}")
+    print(f"   {Path.home() / '.lumina.yaml'}")
     print("\n更新命令:")
     print("   python install.py --update")
+    print("\n卸载命令:")
+    print("   python install.py --uninstall")
     print("\n更多帮助:")
     print("   lumina --help")
     print()

@@ -16,6 +16,10 @@ cd Lumina
 python install.py
 ```
 
+安装脚本会自动检查 `~/.lumina.yaml`：
+- 如果不存在：自动创建一个空白 YAML 文件
+- 如果已存在：保持原文件不覆盖
+
 **Windows:**
 ```powershell
 git clone https://github.com/chenboripple/Lumina.git
@@ -71,8 +75,8 @@ lumina --help
 # 扫描目录并生成笔记
 lumina scan ~/Documents --output ./notes
 
-# 使用配置文件运行
-lumina config ~/.lumina/config.yaml
+# 指定配置文件运行（可选）
+lumina process ~/Documents --config ~/.lumina.yaml
 ```
 
 ## 跨平台注意事项
@@ -121,6 +125,13 @@ pip install -e ".[dev]"
 ## 卸载
 
 ```bash
+# 方式 1：通过安装脚本卸载
+python install.py --uninstall
+
+# 可选：卸载时同时删除 ~/.lumina.yaml
+python install.py --uninstall --remove-config
+
+# 方式 2：使用 pip
 pip uninstall lumina
 ```
 
@@ -148,9 +159,9 @@ pip uninstall lumina
 
 ### API Key 问题
 
-- 确保设置了 `OPENAI_API_KEY` 或 `ANTHROPIC_API_KEY`
+- 确保已在 `~/.lumina.yaml` 中填写 `llm.api_key`
 - 检查 Key 是否有额度
-- 确认 base_url 是否正确（如果使用代理）
+- 确认 `base_url` 是否正确（如果使用代理）
 
 ## 获取帮助
 

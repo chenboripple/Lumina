@@ -4,8 +4,8 @@ Lumina Configuration Manager
 处理配置加载、验证和优先级
 
 配置优先级（从高到低）：
-1. 环境变量（如 OPENAI_API_KEY）
-2. 用户配置文件 ~/.lumina/config.yaml
+1. 指定配置文件（命令行传入 config_path）
+2. 用户配置文件 ~/.lumina.yaml
 3. 代码默认值
 
 注意：LLM 配置已迁移到 llm.py，使用 LLMConfig 和 get_llm_provider
@@ -135,8 +135,8 @@ class LuminaConfig:
         加载配置（按优先级合并）
         
         优先级：
-        1. 环境变量（如 OPENAI_API_KEY）
-        2. 用户配置文件 ~/.lumina/config.yaml
+        1. 指定配置文件（config_path）
+        2. 用户配置文件 ~/.lumina.yaml
         3. 代码默认值
         
         Args:
@@ -149,14 +149,20 @@ class LuminaConfig:
         
         # 收集配置
         user_config = {}
-        
-        # 1. 加载用户配置
+
+        # 1. 选择配置文件路径
         target_config_file = Path(config_path) if config_path else USER_CONFIG_FILE
+
+        # 2. 首次使用时自动创建空白用户配置文件
+        if not config_path and not target_config_file.exists():
+            target_config_file.write_text("", encoding="utf-8")
+
+        # 3. 加载用户配置
         if target_config_file.exists():
             with open(target_config_file, 'r') as f:
                 user_config = yaml.safe_load(f) or {}
         
-        # 2. 用用户配置覆盖默认值创建配置
+        # 4. 用用户配置覆盖默认值创建配置
         return cls._from_dict(user_config)
     
     @classmethod

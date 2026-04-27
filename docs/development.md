@@ -147,10 +147,11 @@ flake8 src/
 ## 常见问题
 
 ### Q: 调试模式看不到 LLM 响应？
-A: 确保设置了 API key：
-```bash
-export OPENAI_API_KEY="your-key-here"
-# 或在配置文件中设置
+A: 确保在 `~/.lumina.yaml` 中配置了 API key：
+```yaml
+llm:
+  provider: openai
+  api_key: "sk-..."
 ```
 
 ### Q: 如何测试多个 Agent 的不同 LLM 配置？
