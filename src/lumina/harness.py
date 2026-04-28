@@ -81,12 +81,12 @@ class HarnessConfig:
         """
         agent_config_attr = f"llm_config_{agent_name}"
         agent_config = getattr(self, agent_config_attr, None)
-        
+
         if agent_config:
-            return agent_config
-        
+            return {**self.llm_config, **agent_config}
+
         # 如果没有单独配置，使用默认配置
-        return self.llm_config
+        return dict(self.llm_config)
 
 
 @dataclass
@@ -307,13 +307,14 @@ class Harness:
             **self.vector_store.get_stats()
         }
     
-    def run(self, input_path: str, recursive: bool = True) -> Dict[str, Any]:
+    def run(self, input_path: str, recursive: bool = True, file_filter: Optional[str] = None) -> Dict[str, Any]:
         """
         执行完整 Harness 流程（Agent 增强版）
         
         Args:
             input_path: 输入文件或目录
             recursive: 是否递归扫描
+            file_filter: 文件过滤规则，支持 glob，多个模式可用逗号分隔
             
         Returns:
             详细执行结果报告
@@ -330,7 +331,7 @@ class Harness:
                 self.progress_tracker.start_file("scanning")
                 self.progress_tracker.next_phase()
             
-            files = self.planner.scan(input_path, recursive)
+            files = self.planner.scan(input_path, recursive, file_filter=file_filter)
             self.state.total_files = len(files)
             self._log(f"📊 Found {len(files)} files total")
             
@@ -548,9 +549,9 @@ class Harness:
                 # 执行（生成/修复内容）- 使用 GracefulDegradation
                 with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context=f"Executor round {iteration+1}", handler=self.error_handler) as gd:
                     if iteration == 0:
-                        current_output = self.executor.execute(context)
+                        gd.result = self.executor.execute(context)
                     else:
-                        current_output = self.executor.revise(context)
+                        gd.result = self.executor.revise(context)
                 
                 current_output = gd.result
                 if current_output is None:
@@ -565,7 +566,8 @@ class Harness:
                 quick_validation = None
                 if iteration == 0 and self.config.quick_validation_first:
                     with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context="Quick validation", handler=self.error_handler) as gd:
-                        quick_validation = self.validator.validate_quick(current_output)
+                        gd.result = self.validator.validate_quick(current_output)
+                    quick_validation = gd.result
                     
                     if quick_validation and not quick_validation.passed and quick_validation.score < 0.5:
                         self._log(f"⚠️  Quick validation failed (score={quick_validation.score:.2f}), "
@@ -574,7 +576,8 @@ class Harness:
                 # 完整验证
                 validation = None
                 with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context="Full validation", handler=self.error_handler) as gd:
-                    validation = self.validator.validate(current_output, file_info, context)
+                    gd.result = self.validator.validate(current_output, file_info, context)
+                validation = gd.result
                 
                 if validation is None:
                     self._log(f"⚠️  Validation failed, using best so far", level="warning")
@@ -696,7 +699,7 @@ class Harness:
                 "cached": False,
                 "final_passed": final_passed,
                 "iterations": len(iteration_history),
-                "best_round": iteration_history.index(max(iteration_history, key=lambda x: x['validation']['score'])) + 1,
+                "best_round": (iteration_history.index(max(iteration_history, key=lambda x: x['validation']['score'])) + 1) if iteration_history else 0,
                 "best_score": best_score,
                 "best_output": best_output,
                 "best_validation": best_validation,
@@ -964,9 +967,10 @@ class Harness:
                 bar = "█" * int(count / max(stats['score_distribution'].values(), 1) * 20)
                 self._log(f"  {grade}: {count:2d} {bar}")
         
-        if stats['errors']:
-            self._log(f"\n⚠️  Errors ({len(stats['errors'])}):")
-            for error in stats['errors']:
+        errors = report.get("errors", [])
+        if errors:
+            self._log(f"\n⚠️  Errors ({len(errors)}):")
+            for error in errors:
                 self._log(f"  ❌ {error.get('file', 'System')}: {error.get('message', str(error))}")
         
         self._log("\n🎉 Processing complete!")

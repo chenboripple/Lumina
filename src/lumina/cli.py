@@ -342,7 +342,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
         if not target_path.exists():
             raise click.ClickException(f"路径不存在: {target_path}")
         effective_recursive = recursive if recursive is not None else lumina_config.default_recursive
-        targets.append((str(target_path), effective_recursive))
+        targets.append((str(target_path), effective_recursive, None))
     else:
         if not lumina_config.input_sources:
             raise click.ClickException(
@@ -355,7 +355,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
                 click.echo(f"⚠️  跳过不存在的输入源: {source_path}")
                 continue
             effective_recursive = recursive if recursive is not None else source.recursive
-            targets.append((str(source_path), effective_recursive))
+            targets.append((str(source_path), effective_recursive, source.filter))
 
     if not targets:
         raise click.ClickException("没有可用的输入源可处理。")
@@ -368,12 +368,12 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
     score_count = 0
     last_harness = None
 
-    for idx, (target_path, target_recursive) in enumerate(targets, start=1):
+    for idx, (target_path, target_recursive, target_filter) in enumerate(targets, start=1):
         if len(targets) > 1:
             click.echo(f"\n[{idx}/{len(targets)}] 处理: {target_path}")
 
         harness = Harness(harness_config)
-        report = harness.run(target_path, recursive=target_recursive)
+        report = harness.run(target_path, recursive=target_recursive, file_filter=target_filter)
         last_harness = harness
 
         stats = report["statistics"]
@@ -442,22 +442,22 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
             click.echo(f"⚠️  跳过不存在的输入源: {source_path}")
             continue
         effective_recursive = recursive if recursive is not None else source.recursive
-        targets.append((source_path, effective_recursive))
+        targets.append((source_path, effective_recursive, source.filter))
         if source_path.is_dir():
             watch_dirs.append(source_path)
 
     if not targets:
         raise click.ClickException("没有可用的 input.sources 可启动服务。")
 
-    def run_target(target_path: Path, target_recursive: bool):
+    def run_target(target_path: Path, target_recursive: bool, target_filter: Optional[str] = None):
         click.echo(f"🔄 处理: {target_path}")
-        return harness.run(str(target_path), recursive=target_recursive)
+        return harness.run(str(target_path), recursive=target_recursive, file_filter=target_filter)
 
     def run_initial_sync_in_background():
         click.echo("🚀 后台初始化同步开始...")
-        for target_path, target_recursive in targets:
+        for target_path, target_recursive, target_filter in targets:
             try:
-                run_target(target_path, target_recursive)
+                run_target(target_path, target_recursive, target_filter)
             except Exception as exc:
                 click.echo(f"❌ 初始化同步失败: {target_path} -> {exc}")
         click.echo("✅ 后台初始化同步完成")

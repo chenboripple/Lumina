@@ -92,7 +92,7 @@ class Validator:
                 from .llm import get_llm_provider
                 self._llm_provider = get_llm_provider(self.llm_config)
             except Exception as e:
-                print(f"⚠️  Failed to initialize LLM for validator: {e}")
+                self._log(f"Failed to initialize LLM for validator: {e}", level="error")
         
         # 统计信息
         self.stats = {
@@ -101,6 +101,11 @@ class Validator:
             "failed_count": 0,
             "avg_score": 0.0,
         }
+
+    def _log(self, message: str, level: str = "info"):
+        """输出验证器日志"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [{level.upper()}] Validator: {message}")
     
     def validate(self, note_output, file_info=None, context=None) -> ValidationResult:
         """
@@ -403,12 +408,16 @@ class Validator:
                             note_output.metadata["llm_confidence"] = result["confidence"]
                             
                 except (json.JSONDecodeError, Exception) as e:
-                    # LLM 响应解析失败，不添加问题
-                    pass
+                    self._log(
+                        f"Failed to parse semantic validation response for {getattr(file_info, 'path', 'unknown')}: {e}",
+                        level="warning"
+                    )
                     
             except Exception as e:
-                # LLM 调用失败，降级到基础检查
-                pass
+                self._log(
+                    f"Semantic validation LLM request failed for {getattr(file_info, 'path', 'unknown')}: {e}",
+                    level="error"
+                )
         
         # 基础检查：检查置信度
         confidence = note_output.metadata.get("confidence", 0)

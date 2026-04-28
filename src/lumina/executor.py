@@ -14,6 +14,7 @@ from datetime import datetime
 from .llm import get_llm_provider, LLMConfig, BaseLLMProvider
 from .cache import CacheManager
 from .history import HistoryManager, ProcessingRecord
+from .core.multimodal_extractor import MultimodalExtractor
 
 
 @dataclass
@@ -96,6 +97,11 @@ class Executor:
             "total_tokens": 0,
             "total_cost": 0.0,
         }
+
+    def _log(self, message: str, level: str = "info"):
+        """输出执行器日志"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        print(f"[{timestamp}] [{level.upper()}] Executor: {message}")
     
     def _get_llm(self) -> BaseLLMProvider:
         """获取 LLM Provider（已预初始化）"""
@@ -241,6 +247,7 @@ class Executor:
             
         except Exception as e:
             # 出错时回退到基本读取
+            self._log(f"Multimodal extraction failed for {path}: {e}", level="warning")
             return self._read_text_file(path)
     
     def _read_text_file(self, path: Path) -> List[str]:
@@ -257,6 +264,7 @@ class Executor:
             return self._split_content(content)
             
         except Exception as e:
+            self._log(f"Text read failed for {path}: {e}", level="error")
             return [f"[Error reading file: {e}]"]
     
     def _read_image(self, path: Path) -> str:
@@ -330,8 +338,8 @@ class Executor:
                     metadata=data.get("metadata", {}),
                     processing_info={"cached": True, "cache_key": cache_key}
                 )
-            except Exception:
-                pass
+            except Exception as e:
+                self._log(f"Failed to deserialize cached LLM response for {cache_key}: {e}", level="warning")
         return None
     
     def _cache_result(self, cache_key: str, note: NoteOutput):
@@ -442,7 +450,7 @@ Return JSON with this structure:
         validation = context.previous_validation
         
         issues_text = "\n".join([
-            f"- [{i['severity']}] {i['type']}: {i['message']}"
+            f"- [{i.severity}] {i.type}: {i.message}"
             for i in validation.issues
         ])
         
@@ -504,15 +512,11 @@ Return JSON with this structure:
             return response
             
         except Exception as e:
-            # 降级处理
-            return json.dumps({
-                "title": "Error",
-                "summary": f"LLM call failed: {str(e)}",
-                "key_points": [],
-                "tags": ["error"],
-                "suggested_links": [],
-                "metadata": {"complexity": "simple", "confidence": 0.0, "error": str(e)}
-            })
+            self._log(
+                f"LLM request failed for {context.file_info.path} round={context.iteration + 1}: {e}",
+                level="error"
+            )
+            raise
     
     def _parse_output(self, raw_output: str, file_info, context: ExecutionContext) -> NoteOutput:
         """解析 LLM 输出"""
@@ -539,7 +543,10 @@ Return JSON with this structure:
             )
             
         except (json.JSONDecodeError, ValueError) as e:
-            # 解析失败，返回原始内容
+            self._log(
+                f"Failed to parse LLM output for {file_info.path} round={context.iteration + 1}: {e}",
+                level="warning"
+            )
             return NoteOutput(
                 title=file_info.path.stem,
                 content=raw_output,

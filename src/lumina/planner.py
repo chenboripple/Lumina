@@ -7,6 +7,7 @@ Planner - 智能规划模块 (Agent 能力增强版)
 import os
 import json
 import hashlib
+import fnmatch
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, field
@@ -98,30 +99,57 @@ class Planner:
             "total_estimated_cost": 0,
         }
     
-    def scan(self, input_path: str, recursive: bool = True) -> List[FileInfo]:
+    def scan(self, input_path: str, recursive: bool = True, file_filter: Optional[str] = None) -> List[FileInfo]:
         """
         扫描目录，返回文件信息列表
         
         Args:
             input_path: 输入路径（文件或目录）
             recursive: 是否递归扫描
+            file_filter: 文件过滤规则，支持 glob，多个模式可用逗号分隔
             
         Returns:
             文件信息列表
         """
         path = Path(input_path)
         files = []
+        patterns = [p.strip() for p in (file_filter or "").split(",") if p.strip()]
+
+        def matches_filter(file_path: Path) -> bool:
+            if not patterns:
+                return True
+
+            try:
+                relative_path = file_path.relative_to(path)
+            except ValueError:
+                relative_path = file_path
+
+            relative_text = str(relative_path)
+            full_text = str(file_path)
+            for pattern in patterns:
+                if (
+                    fnmatch.fnmatch(file_path.name, pattern)
+                    or fnmatch.fnmatch(relative_text, pattern)
+                    or fnmatch.fnmatch(full_text, pattern)
+                    or file_path.match(pattern)
+                    or relative_path.match(pattern)
+                ):
+                    return True
+            return False
         
         if path.is_file():
             # 单文件
-            file_info = self._analyze_file(path)
-            if file_info:
-                files.append(file_info)
+            if matches_filter(path):
+                file_info = self._analyze_file(path)
+                if file_info:
+                    files.append(file_info)
         elif path.is_dir():
             # 目录扫描
             pattern = "**/*" if recursive else "*"
             for file_path in path.glob(pattern):
                 if file_path.is_file():
+                    if not matches_filter(file_path):
+                        continue
                     file_info = self._analyze_file(file_path)
                     if file_info:
                         files.append(file_info)
