@@ -149,55 +149,88 @@ async function loadDashboardData() {
     }
 }
 
+// 构建文件路径树结构
+function buildFileTree(files) {
+    const dirs = files.map(f => {
+        const i = (f.file_path || '').lastIndexOf('/');
+        return i >= 0 ? f.file_path.substring(0, i) : '';
+    });
+    let prefix = dirs[0] + '/';
+    for (const d of dirs) {
+        const p = d + '/';
+        let i = 0;
+        while (i < prefix.length && i < p.length && prefix[i] === p[i]) i++;
+        prefix = prefix.substring(0, i);
+    }
+    const lastSlash = prefix.lastIndexOf('/');
+    prefix = lastSlash >= 0 ? prefix.substring(0, lastSlash + 1) : '';
+
+    const root = { children: {}, files: [] };
+    for (const item of files) {
+        const rel = item.file_path && item.file_path.startsWith(prefix)
+            ? item.file_path.slice(prefix.length)
+            : (item.file_path || '');
+        const parts = rel.split('/').filter(Boolean);
+        let node = root;
+        for (let i = 0; i < parts.length - 1; i++) {
+            const seg = parts[i];
+            if (!node.children[seg]) node.children[seg] = { children: {}, files: [] };
+            node = node.children[seg];
+        }
+        node.files.push(item);
+    }
+    return { root, prefix };
+}
+
+function countFilesInNode(node) {
+    let count = node.files.length;
+    for (const child of Object.values(node.children)) count += countFilesInNode(child);
+    return count;
+}
+
+function renderTreeNode(node, idPrefix) {
+    let html = '';
+    Object.entries(node.children).forEach(([name, child], idx) => {
+        const nodeId = `${idPrefix}_${idx}`;
+        const total = countFilesInNode(child);
+        html += `<div class="pf-dir-group pf-nested">
+            <div class="pf-dir-header" onclick="togglePfGroup('${nodeId}')">
+                <span class="pf-dir-arrow" id="${nodeId}-arrow">▶</span>
+                <span class="pf-dir-name">${escapeHtml(name)}/</span>
+                <span class="pf-dir-count">${total} 个文件</span>
+            </div>
+            <div class="pf-dir-files pf-collapsed" id="${nodeId}">
+                ${renderTreeNode(child, nodeId)}
+            </div>
+        </div>`;
+    });
+    html += node.files.map(item => `
+        <div class="processed-file-item" title="${escapeHtml(item.file_path || '')}">
+            <div class="processed-file-main">
+                <div class="processed-file-name">${escapeHtml(item.file_name || 'unknown')}</div>
+            </div>
+            <div class="processed-file-meta">
+                <div class="processed-file-time">${formatDateTime(item.last_processed_time)}</div>
+                <div class="processed-file-version">v${item.processing_version || 0}</div>
+            </div>
+        </div>`).join('');
+    return html;
+}
+
 function renderRecentProcessedFiles(files) {
     const container = document.getElementById('processed-files-list');
     if (!container) return;
-
     if (!files || files.length === 0) {
         container.innerHTML = '<p class="hint">暂无已处理记录</p>';
         return;
     }
-
-    // Group by parent directory
-    const groups = {};
-    files.forEach(item => {
-        const fp = item.file_path || '';
-        const sep = fp.lastIndexOf('/');
-        const dir = sep >= 0 ? fp.substring(0, sep) : '(根目录)';
-        if (!groups[dir]) groups[dir] = [];
-        groups[dir].push(item);
-    });
-
-    const dirCount = Object.keys(groups).length;
-    // Collapse by default when there are multiple directories or many files
-    const defaultCollapsed = dirCount > 1 || files.length > 8;
-
+    const { root, prefix } = buildFileTree(files);
+    const shortPrefix = prefix.replace(/^\/Users\/[^/]+/, '~').replace(/\/$/, '');
     let html = '';
-    Object.entries(groups).forEach(([dir, items], idx) => {
-        const groupId = `pf-group-${idx}`;
-        const collapsed = defaultCollapsed;
-        const shortDir = dir.replace(/^\/Users\/[^/]+/, '~');
-        html += `
-        <div class="pf-dir-group">
-            <div class="pf-dir-header" onclick="togglePfGroup('${groupId}')">
-                <span class="pf-dir-arrow ${collapsed ? '' : 'expanded'}" id="${groupId}-arrow">▶</span>
-                <span class="pf-dir-name" title="${escapeHtml(dir)}">${escapeHtml(shortDir)}</span>
-                <span class="pf-dir-count">${items.length} 个文件</span>
-            </div>
-            <div class="pf-dir-files ${collapsed ? 'pf-collapsed' : ''}" id="${groupId}">
-                ${items.map(item => `
-                <div class="processed-file-item" title="${escapeHtml(item.file_path || '')}">
-                    <div class="processed-file-main">
-                        <div class="processed-file-name">${escapeHtml(item.file_name || 'unknown')}</div>
-                    </div>
-                    <div class="processed-file-meta">
-                        <div class="processed-file-time">${formatDateTime(item.last_processed_time)}</div>
-                        <div class="processed-file-version">v${item.processing_version || 0}</div>
-                    </div>
-                </div>`).join('')}
-            </div>
-        </div>`;
-    });
+    if (shortPrefix) {
+        html += `<div class="pf-root-label" title="${escapeHtml(prefix)}">${escapeHtml(shortPrefix)}</div>`;
+    }
+    html += renderTreeNode(root, 'pfr');
     container.innerHTML = html;
 }
 
@@ -206,9 +239,7 @@ function togglePfGroup(groupId) {
     const arrow = document.getElementById(groupId + '-arrow');
     if (!el) return;
     const collapsed = el.classList.toggle('pf-collapsed');
-    if (arrow) {
-        arrow.classList.toggle('expanded', !collapsed);
-    }
+    if (arrow) arrow.classList.toggle('expanded', !collapsed);
 }
 
 // 搜索功能
