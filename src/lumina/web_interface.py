@@ -22,6 +22,9 @@ except ImportError:
     FLASK_AVAILABLE = False
 
 
+from .planner import Planner
+
+
 class WebInterface:
     """
     Lumina Web管理界面
@@ -35,11 +38,12 @@ class WebInterface:
     6. 📈 实时监控 - 处理进度、日志
     """
     
-    def __init__(self, harness=None, host='0.0.0.0', port=5000):
+    def __init__(self, harness=None, host='0.0.0.0', port=5088, lumina_config=None):
         self.harness = harness
         self.host = host
         self.port = port
         self.app = None
+        self.lumina_config = lumina_config
         
         if not FLASK_AVAILABLE:
             raise ImportError(
@@ -106,8 +110,8 @@ class WebInterface:
         @self.app.route('/api/graph')
         def api_graph():
             """获取知识图谱数据"""
-            if not self.harness or not self.harness.vector_store:
-                return jsonify({"error": "Vector store not available"}), 503
+            if not self.harness:
+                return jsonify({"error": "Harness not available"}), 503
             
             try:
                 min_similarity = request.args.get('min_similarity', 0.7, type=float)
@@ -169,6 +173,7 @@ class WebInterface:
                     "title": metadata.get('title', note_path.stem),
                     "content": content,
                     "metadata": metadata,
+                    "source_path": metadata.get('source'),
                     "tags": metadata.get('tags', []),
                     "links": metadata.get('links', [])
                 })
@@ -188,16 +193,23 @@ class WebInterface:
                 
                 if not source_path or not Path(source_path).exists():
                     return jsonify({"error": "Source file not found"}), 404
-                
-                # 重新处理文件
-                from ..planner import FileInfo
-                file_info = FileInfo(
-                    path=Path(source_path),
-                    type="markdown",
-                    size=Path(source_path).stat().st_size,
-                    modified=Path(source_path).stat().st_mtime,
-                    hash=""
+
+                source_file = Path(source_path).expanduser().resolve()
+                allowed_source = self._resolve_allowed_source(source_file)
+                if not allowed_source:
+                    return jsonify({"error": "Source file is not allowed by current input.sources configuration"}), 400
+
+                source_root, source_filter = allowed_source
+                scanned = self.harness.planner.scan(
+                    str(source_file),
+                    recursive=False,
+                    file_filter=source_filter,
+                    supported_extensions=self.harness.config.supported_extensions,
                 )
+                if not scanned:
+                    return jsonify({"error": "Source file is filtered out by current filter or supported_extensions settings"}), 400
+                
+                file_info = scanned[0]
                 
                 plan = {"strategy": "direct", "batches": [[file_info]]}
                 result = self.harness._process_single(file_info, plan)
@@ -294,6 +306,30 @@ class WebInterface:
         def serve_static(filename):
             """提供静态文件"""
             return send_from_directory(self._get_static_dir(), filename)
+
+    def _resolve_allowed_source(self, source_path: Path):
+        """根据当前配置判断源文件是否允许重新生成，并返回匹配到的输入源规则。"""
+        if not self.lumina_config:
+            return None
+
+        if not Planner.is_supported_extension(source_path, self.lumina_config.supported_extensions):
+            return None
+
+        for source in self.lumina_config.input_sources:
+            source_root = source.resolve_path().resolve()
+            if source_root.is_file():
+                matches_root = source_root == source_path
+            else:
+                matches_root = source_path == source_root or source_root in source_path.parents
+
+            if not matches_root:
+                continue
+
+            filter_root = source_root.parent if source_root.is_file() else source_root
+            if Planner.matches_file_filter(source_path, filter_root, source.filter):
+                return source_root, source.filter
+
+        return None
     
     def _get_dashboard_stats(self) -> Dict[str, Any]:
         """获取仪表板统计数据"""
@@ -306,7 +342,8 @@ class WebInterface:
                 "available": False,
                 "total_documents": 0
             },
-            "recent_activity": []
+            "recent_activity": [],
+            "recent_processed_files": []
         }
         
         try:
@@ -325,6 +362,29 @@ class WebInterface:
                         "available": vector_stats.get("available", False),
                         "total_documents": vector_stats.get("total_documents", 0),
                     }
+                except Exception:
+                    pass
+
+                # 最近标记为已处理的文件（来自增量指纹）
+                try:
+                    source_roots = []
+                    if self.lumina_config:
+                        for source in self.lumina_config.input_sources:
+                            source_roots.append(source.resolve_path())
+
+                    recent_files = self.harness.change_tracker.get_recent_processed_files(
+                        limit=20,
+                        roots=source_roots or None,
+                    )
+                    stats["recent_processed_files"] = [
+                        {
+                            "file_path": item["file_path"],
+                            "file_name": Path(item["file_path"]).name,
+                            "last_processed_time": datetime.fromtimestamp(item["last_processed_time"]).isoformat(),
+                            "processing_version": item.get("processing_version", 0),
+                        }
+                        for item in recent_files
+                    ]
                 except Exception:
                     pass
         except Exception:
@@ -373,7 +433,7 @@ class WebInterfaceConfig:
     
     def __init__(self):
         self.host = '0.0.0.0'
-        self.port = 5000
+        self.port = 5088
         self.debug = False
         self.auth_enabled = False
         self.auth_username = 'admin'

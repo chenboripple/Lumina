@@ -1,4 +1,3 @@
-
 """
 Lumina Configuration Manager
 处理配置加载、验证和优先级
@@ -34,7 +33,7 @@ class InputSource:
     path: str
     recursive: bool = True
     filter: Optional[str] = None
-    
+
     def resolve_path(self) -> Path:
         """解析路径（支持 ~ 展开）"""
         return Path(os.path.expanduser(self.path))
@@ -46,59 +45,59 @@ class OutputConfig:
     plugin: str = "obsidian"
     base_dir: str = "~/Lumina/Notes"
     vault_path: Optional[str] = None
-    
+
     # 目录结构
     structure: Dict[str, bool] = field(default_factory=lambda: {
         "by_date": False,
         "by_type": True,
         "flat": False,
     })
-    
+
     # 命名约定
     naming: Dict[str, bool] = field(default_factory=lambda: {
         "prefix_date": False,
         "slugify": True,
     })
-    
+
     def resolve_base_dir(self) -> Path:
         """解析输出根目录"""
         return Path(os.path.expanduser(self.base_dir))
-    
+
     def resolve_vault_path(self) -> Optional[Path]:
         """解析 Vault 路径"""
         if self.vault_path:
             return Path(os.path.expanduser(self.vault_path))
         return None
-    
+
     def get_output_path(self, note_title: str, file_type: str = "") -> Path:
         """根据配置生成输出路径"""
         base = self.resolve_base_dir()
-        
+
         # 按类型分目录
         if self.structure.get("by_type") and file_type:
             base = base / file_type
-        
+
         # 按日期分目录
         if self.structure.get("by_date"):
             from datetime import datetime
             today = datetime.now()
             base = base / f"{today.year}/{today.month:02d}"
-        
+
         # 确保目录存在
         base.mkdir(parents=True, exist_ok=True)
-        
+
         # 生成文件名
         filename = note_title
         if self.naming.get("prefix_date"):
             from datetime import datetime
             today = datetime.now()
             filename = f"{today.strftime('%Y-%m-%d')}-{filename}"
-        
+
         if self.naming.get("slugify"):
             filename = self._slugify(filename)
-        
+
         return base / f"{filename}.md"
-    
+
     def _slugify(self, text: str) -> str:
         """转义文件名"""
         import re
@@ -110,45 +109,50 @@ class OutputConfig:
 @dataclass
 class LuminaConfig:
     """Lumina 完整配置"""
-    
+
     # 输入配置
     input_sources: List[InputSource] = field(default_factory=list)
     default_recursive: bool = True
     supported_extensions: List[str] = field(default_factory=lambda: DEFAULT_SUPPORTED_EXTENSIONS.copy())
-    
+
     # 输出配置
     output: OutputConfig = field(default_factory=OutputConfig)
-    
+
     # Harness 配置
     harness: Dict[str, Any] = field(default_factory=lambda: {
         "max_iterations": 3,
         "quality_threshold": 0.8,
     })
-    
+
+    # 服务配置
+    service: Dict[str, Any] = field(default_factory=lambda: {
+        "log_retention_days": 15,
+    })
+
     # LLM 配置（使用 llm.py 中的 LLMConfig）
     llm: LLMProviderConfig = field(default_factory=LLMProviderConfig)
     llm_planner: Optional[Dict[str, Any]] = None  # Planner 专用配置
     llm_executor: Optional[Dict[str, Any]] = None  # Executor 专用配置
     llm_validator: Optional[Dict[str, Any]] = None  # Validator 专用配置
-    
+
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "LuminaConfig":
         """
         加载配置（按优先级合并）
-        
+
         优先级：
         1. 指定配置文件（config_path）
         2. 用户配置文件 ~/.lumina/lumina.yaml
         3. 代码默认值
-        
+
         Args:
             config_path: 指定用户配置文件路径（可选，覆盖默认路径）
-            
+
         Returns:
             合并后的配置
         """
         import yaml
-        
+
         # 收集配置
         user_config = {}
 
@@ -164,10 +168,10 @@ class LuminaConfig:
         if target_config_file.exists():
             with open(target_config_file, 'r') as f:
                 user_config = yaml.safe_load(f) or {}
-        
+
         # 4. 用用户配置覆盖默认值创建配置
         return cls._from_dict(user_config)
-    
+
     @classmethod
     def _from_dict(cls, data: Dict[str, Any]) -> "LuminaConfig":
         """从字典创建配置（未提供的字段使用默认值）"""
@@ -181,7 +185,7 @@ class LuminaConfig:
                 recursive=source.get("recursive", True),
                 filter=source.get("filter")
             ))
-        
+
         # 输出配置
         output_data = data.get("output", {})
         output_config = OutputConfig(
@@ -191,7 +195,7 @@ class LuminaConfig:
             structure=output_data.get("structure", {}),
             naming=output_data.get("naming", {}),
         )
-        
+
         # 解析 LLM 配置（使用 llm.py 中的 LLMConfig）
         llm_data = data.get("llm", {})
         llm_config = LLMProviderConfig(
@@ -205,57 +209,61 @@ class LuminaConfig:
             max_retries=llm_data.get("max_retries", 3),
             retry_delay=llm_data.get("retry_delay", 1.0),
         )
-        
+
         # 解析各 Agent 的 LLM 配置
         planner_llm_data = data.get("llm_planner")
         executor_llm_data = data.get("llm_executor")
         validator_llm_data = data.get("llm_validator")
-        
+
+        service_data = {"log_retention_days": 15}
+        service_data.update(data.get("service", {}))
+
         return cls(
             input_sources=sources,
             default_recursive=input_data.get("default_recursive", True),
             supported_extensions=input_data.get("supported_extensions", DEFAULT_SUPPORTED_EXTENSIONS.copy()),
             output=output_config,
             harness=data.get("harness", {}),
+            service=service_data,
             llm=llm_config,
             llm_planner=planner_llm_data,
             llm_executor=executor_llm_data,
             llm_validator=validator_llm_data,
         )
-    
+
     def validate(self) -> List[str]:
         """验证配置有效性"""
         errors = []
-        
+
         # 验证输入源
         for i, source in enumerate(self.input_sources):
             path = source.resolve_path()
             if not path.exists():
                 errors.append(f"Input source {i+1} does not exist: {path}")
-        
+
         # 验证输出目录
         output_base = self.output.resolve_base_dir()
         try:
             output_base.mkdir(parents=True, exist_ok=True)
         except PermissionError:
             errors.append(f"Cannot create output directory: {output_base}")
-        
+
         # 验证 Vault 路径
         if self.output.vault_path:
             vault = self.output.resolve_vault_path()
             if vault and not vault.exists():
                 errors.append(f"Vault path does not exist: {vault}")
-        
+
         # 验证 LLM 配置
         llm_errors = self.llm.validate()
         errors.extend(llm_errors)
-        
+
         return errors
-    
+
     def save_user_config(self):
         """保存当前配置到 ~/.lumina/lumina.yaml"""
         import yaml
-        
+
         config_dict = {
             "input": {
                 "sources": [
@@ -278,8 +286,9 @@ class LuminaConfig:
             },
             "llm": self.llm.to_dict(),
             "harness": self.harness,
+            "service": self.service,
         }
-        
+
         USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
         with open(USER_CONFIG_FILE, 'w') as f:
             yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)

@@ -9,6 +9,13 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Iterator, List
 from dataclasses import dataclass
 import json
+import requests
+
+
+def _log_llm(message: str, level: str = "INFO"):
+    """输出 LLM 请求日志"""
+    timestamp = time.strftime("%H:%M:%S")
+    print(f"[{timestamp}] [{level}] LLM: {message}")
 
 
 @dataclass
@@ -40,7 +47,7 @@ class LLMConfig:
         """验证配置有效性"""
         errors = []
         if not self.api_key:
-            errors.append(f"Missing api_key for {self.provider} (set it in ~/.lumina.yaml)")
+            errors.append(f"Missing api_key for {self.provider} (set it in ~/.lumina/lumina.yaml)")
         if not self.base_url:
             errors.append(f"Missing base_url for {self.provider}")
         return errors
@@ -86,8 +93,16 @@ class BaseLLMProvider(ABC):
                 return func(*args, **kwargs)
             except Exception as e:
                 last_error = e
+                _log_llm(
+                    f"provider={self.config.provider} model={self.config.model} attempt={attempt + 1}/{self.config.max_retries} failed: {e}",
+                    level="ERROR"
+                )
                 if attempt < self.config.max_retries - 1:
                     time.sleep(self.config.retry_delay * (attempt + 1))
+        _log_llm(
+            f"provider={self.config.provider} model={self.config.model} exhausted retries: {last_error}",
+            level="ERROR"
+        )
         raise RuntimeError(f"LLM call failed after {self.config.max_retries} retries: {last_error}")
 
 
@@ -144,45 +159,51 @@ class AnthropicProvider(BaseLLMProvider):
     
     def __init__(self, config: LLMConfig):
         super().__init__(config)
-        try:
-            import anthropic
-            self.client = anthropic.Anthropic(
-                api_key=config.api_key,
-                base_url=config.base_url,
-                timeout=config.timeout,
-            )
-        except ImportError:
-            raise ImportError("Anthropic package not installed. Run: pip install anthropic")
+        self.base_url = config.base_url.rstrip("/")
+        if not self.base_url.endswith("/v1"):
+            self.base_url = f"{self.base_url}/v1"
+
+    def _request(self, prompt: str, **kwargs) -> Dict[str, Any]:
+        headers = {
+            "x-api-key": self.config.api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+        payload = {
+            "model": self.config.model,
+            "max_tokens": self.config.max_tokens,
+            "temperature": self.config.temperature,
+            "messages": [{"role": "user", "content": prompt}],
+            **kwargs,
+        }
+        response = requests.post(
+            f"{self.base_url}/messages",
+            headers=headers,
+            json=payload,
+            timeout=self.config.timeout,
+        )
+        response.raise_for_status()
+        return response.json()
     
     def complete(self, prompt: str, **kwargs) -> str:
         """调用 Anthropic API"""
         def _call():
-            response = self.client.messages.create(
-                model=self.config.model,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-                messages=[{"role": "user", "content": prompt}],
-                **kwargs
-            )
-            return response.content[0].text
+            response = self._request(prompt, **kwargs)
+            content = response.get("content", [])
+            text = "".join(
+                item.get("text", "")
+                for item in content
+                if isinstance(item, dict)
+            ).strip()
+            if not text:
+                raise ValueError(f"Anthropic response missing text content: {response}")
+            return text
         
         return self._retry_call(_call)
     
     def stream(self, prompt: str, **kwargs) -> Iterator[str]:
         """流式调用 Anthropic API"""
-        def _call():
-            with self.client.messages.stream(
-                model=self.config.model,
-                max_tokens=self.config.max_tokens,
-                temperature=self.config.temperature,
-                messages=[{"role": "user", "content": prompt}],
-                **kwargs
-            ) as stream:
-                return stream
-        
-        stream = self._retry_call(_call)
-        for text in stream.text_stream:
-            yield text
+        yield self.complete(prompt, **kwargs)
 
 
 class LLMProviderFactory:

@@ -1,6 +1,6 @@
-# ~/.lumina.yaml 配置参考
+# ~/.lumina/lumina.yaml 配置参考
 
-Lumina 的所有配置通过用户主目录下的 `~/.lumina.yaml` 文件管理，不在项目目录内存放任何配置。
+Lumina 的所有配置通过用户主目录下的 `~/.lumina/lumina.yaml` 文件管理，不在项目目录内存放任何配置。
 
 > 本文件为完整配置示例，包含所有可用字段和说明。实际使用时只需保留需要修改的字段，其余字段会使用代码默认值。
 
@@ -69,6 +69,12 @@ output:
 harness:
   max_iterations: 3              # 每篇笔记最多修复轮数
   quality_threshold: 0.8         # 质量达标阈值（0.0 ~ 1.0）
+
+# ──────────────────────────────────────────────
+# 服务配置
+# ──────────────────────────────────────────────
+service:
+  log_retention_days: 15         # 日志保留天数（按天分文件）
 
 # ──────────────────────────────────────────────
 # LLM 配置
@@ -147,9 +153,9 @@ llm:
 ## 配置生效方式
 
 ```bash
-# 使用默认路径 ~/.lumina.yaml
-lumina scan ~/Documents
+# 使用默认路径 ~/.lumina/lumina.yaml
+lumina start
 
 # 指定配置文件路径
-lumina --config /path/to/custom.yaml scan ~/Documents
+lumina start --config /path/to/custom.yaml
 ```

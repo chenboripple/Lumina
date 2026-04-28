@@ -2,7 +2,7 @@
 
 > 从本地文件萃取知识，生成结构化笔记的 AI Agent
 
-Lumina 是一个**本地知识整理管道**。给它一个或多个目录，它会扫描文档、代码、PDF、图片等文件，通过 AI 提取核心信息，生成高质量的 Markdown 笔记，并直接输出到 Obsidian 等笔记工具。
+Lumina 是一个**本地常驻知识整理服务**。它从 `~/.lumina/lumina.yaml` 读取输入目录与输出规则，启动后常驻运行，提供 Web 管理界面、目录变化监听、自动增量更新，以及手动重生成笔记能力。
 
 ```
 本地文件 ──► Planner ──► Executor ──► Validator ──► Obsidian / Markdown
@@ -23,7 +23,7 @@ python install.py
 
 ## 配置
 
-所有配置通过 `~/.lumina.yaml` 管理，**不读取环境变量**。
+所有配置通过 `~/.lumina/lumina.yaml` 管理，**不读取环境变量**。
 
 **最小配置：**
 
@@ -39,18 +39,37 @@ llm:
 ## 使用
 
 ```bash
-# 扫描目录并生成笔记
-lumina scan ~/Documents --output ~/Lumina/Notes
+# 后台启动常驻服务（推荐）
+lumina start
 
-# 递归扫描，只处理 Markdown 文件
-lumina scan ~/Documents --recursive --filter "*.md"
+# 查看服务状态
+lumina status
 
-# 调试模式（单文件逐步追踪）
-lumina debug test.md
+# 停止后台服务
+lumina stop
 
-# 验证配置
-lumina --validate-config
+# 打开 Web 界面
+# http://127.0.0.1:5088
+
+# 前台调试模式（保留）
+lumina serve
+
+# 一次性手动处理（可选）
+lumina process
+lumina process ~/Documents
+
+# 调试模式
+lumina debug
 ```
+
+服务模式下：
+
+1. 启动时会先按 `~/.lumina/lumina.yaml` 执行一次初始化处理
+2. 随后持续监听 `input.sources` 中的目录变化
+3. 检测到文件新增/修改后自动增量更新对应笔记
+4. 也可以在页面中手动触发单篇笔记重新生成
+5. 后台服务会维护 `~/.lumina/service.pid` 与按日期拆分的 `~/.lumina/service-YYYY-MM-DD.log`
+6. 默认仅保留最近 15 天日志，可用 `service.log_retention_days` 覆盖
 
 ## 核心架构
 

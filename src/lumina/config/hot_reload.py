@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileModifiedEvent
 
-from ..config import LuminaConfig
+from ..config_core import LuminaConfig
 
 
 class ConfigChangeEvent:

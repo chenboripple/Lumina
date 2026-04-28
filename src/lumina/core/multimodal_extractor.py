@@ -273,7 +273,7 @@ class CodeExtractor(BaseExtractor):
         '.r', '.m', '.mm', '.cs', '.vb', '.fs', '.clj',
         '.erl', '.ex', '.exs', '.hs', '.lua', '.pl', '.pm',
         '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
-        '.sql', '.html', '.css', '.scss', '.sass', '.less',
+        '.html', '.css', '.scss', '.sass', '.less',
         '.xml', '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg',
         '.dockerfile', '.makefile', '.cmake', '.gradle', '.maven',
     }

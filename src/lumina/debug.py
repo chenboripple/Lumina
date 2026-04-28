@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List
 from dataclasses import asdict
 
 from .harness import Harness, HarnessConfig
-from .config import LuminaConfig
+from .config_core import LuminaConfig
 from .planner import FileInfo, ProcessingPlan
 from .executor import NoteOutput, ExecutionContext
 from .validator import ValidationResult
@@ -358,7 +358,7 @@ class LuminaDebugger:
                         self.debug_single_file(file_path)
                 
                 elif command == "test_config":
-                    config_path = input("配置文件路径 [~/.lumina/config.yaml]: ").strip()
+                    config_path = input("配置文件路径 [~/.lumina/lumina.yaml]: ").strip()
                     if config_path:
                         config = LuminaConfig.load(config_path)
                     else:

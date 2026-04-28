@@ -16,6 +16,10 @@ cd Lumina
 python install.py
 ```
 
+安装脚本会自动检查 `~/.lumina/lumina.yaml`：
+- 如果不存在：自动创建一个空白 YAML 文件
+- 如果已存在：保持原文件不覆盖
+
 **Windows:**
 ```powershell
 git clone https://github.com/chenboripple/Lumina.git
@@ -41,13 +45,13 @@ pip install -e ".[dev]"
 
 ### 首次使用
 
-安装完成后，在主目录创建配置文件 `~/.lumina.yaml`（Windows 用户为 `%USERPROFILE%\.lumina.yaml`）。
+安装完成后，在主目录创建配置文件 `~/.lumina/lumina.yaml`（Windows 用户为 `%USERPROFILE%\.lumina\lumina.yaml`）。
 
 ### 配置 LLM
 
-Lumina 通过 `~/.lumina.yaml` 管理所有配置，**不读取环境变量**，api_key 需在配置文件中显式填写。
+Lumina 通过 `~/.lumina/lumina.yaml` 管理所有配置，**不读取环境变量**，api_key 需在配置文件中显式填写。
 
-创建 `~/.lumina.yaml`：
+创建 `~/.lumina/lumina.yaml`：
 
 ```yaml
 llm:
@@ -68,11 +72,36 @@ lumina --help
 ## 快速开始
 
 ```bash
-# 扫描目录并生成笔记
-lumina scan ~/Documents --output ./notes
+# 后台启动常驻服务（推荐）
+lumina start
 
-# 使用配置文件运行
-lumina config ~/.lumina/config.yaml
+# 查看状态
+lumina status
+
+# 停止后台服务
+lumina stop
+
+# 默认打开 Web 管理界面
+# http://127.0.0.1:5088
+
+# 前台调试模式（保留）
+lumina serve
+
+# 一次性处理任务（可选）
+lumina process
+```
+
+后台模式会自动管理：
+
+- PID 文件: `~/.lumina/service.pid`
+- 日志文件: `~/.lumina/service-YYYY-MM-DD.log`
+- 元数据: `~/.lumina/service.json`
+
+日志默认只保留最近 15 天。可在 `~/.lumina/lumina.yaml` 中配置：
+
+```yaml
+service:
+   log_retention_days: 30
 ```
 
 ## 跨平台注意事项
@@ -121,6 +150,13 @@ pip install -e ".[dev]"
 ## 卸载
 
 ```bash
+# 方式 1：通过安装脚本卸载
+python install.py --uninstall
+
+# 可选：卸载时同时删除 ~/.lumina/lumina.yaml
+python install.py --uninstall --remove-config
+
+# 方式 2：使用 pip
 pip uninstall lumina
 ```
 
@@ -148,9 +184,9 @@ pip uninstall lumina
 
 ### API Key 问题
 
-- 确保设置了 `OPENAI_API_KEY` 或 `ANTHROPIC_API_KEY`
+- 确保已在 `~/.lumina/lumina.yaml` 中填写 `llm.api_key`
 - 检查 Key 是否有额度
-- 确认 base_url 是否正确（如果使用代理）
+- 确认 `base_url` 是否正确（如果使用代理）
 
 ## 获取帮助
 
