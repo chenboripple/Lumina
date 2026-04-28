@@ -15,6 +15,8 @@ from .llm import get_llm_provider, LLMConfig, BaseLLMProvider
 from .cache import CacheManager
 from .history import HistoryManager, ProcessingRecord
 from .core.multimodal_extractor import MultimodalExtractor
+from .scene_detector import SceneDetector, DocumentScene
+from .content_filter import ContentFilter, FilterResult
 
 
 @dataclass
@@ -77,11 +79,17 @@ class Executor:
         self, 
         llm_config: Dict[str, Any] = None,
         cache_manager: CacheManager = None,
-        history_manager: HistoryManager = None
+        history_manager: HistoryManager = None,
+        enable_content_filter: bool = True,
+        enable_scene_detection: bool = True,
     ):
         self.llm_config = llm_config or {}
         self.cache_manager = cache_manager or CacheManager()
         self.history_manager = history_manager
+        
+        # 初始化场景检测器和内容过滤器
+        self.scene_detector = SceneDetector() if enable_scene_detection else None
+        self.content_filter = ContentFilter() if enable_content_filter else None
         
         # 提前初始化 LLM 提供者，启动时校验配置
         try:
@@ -111,6 +119,10 @@ class Executor:
         """
         执行笔记生成（Agent 增强版）
         
+        增强功能：
+        1. 内容过滤 - 跳过无价值文档
+        2. 场景检测 - 识别文档场景并匹配提取模板
+        
         Args:
             context: 执行上下文
             
@@ -121,9 +133,49 @@ class Executor:
         
         # 1. 读取文件内容（智能分块）
         content_chunks = self._read_file_smart(file_info.path)
+        full_content = "\n".join(content_chunks)
         
-        # 2. 检查缓存
-        cache_key = self._generate_cache_key(file_info, content_chunks)
+        # 2. 内容过滤检查
+        if self.content_filter:
+            filter_result = self.content_filter.check(file_info.path, full_content)
+            if not filter_result.should_process:
+                self._log(
+                    f"Filtered {file_info.path}: {filter_result.reason}",
+                    level="info"
+                )
+                return NoteOutput(
+                    title=f"[FILTERED] {file_info.path.stem}",
+                    content=f"_Content filtered: {filter_result.reason}_",
+                    tags=["filtered"],
+                    links=[],
+                    source=str(file_info.path),
+                    metadata={
+                        "filtered": True,
+                        "filter_reason": filter_result.reason,
+                        "filter_confidence": filter_result.confidence,
+                    },
+                    processing_info={
+                        "session_id": context.session_id,
+                        "iteration": context.iteration,
+                        "filtered": True,
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                )
+        
+        # 3. 场景检测
+        detected_scene = None
+        scene_confidence = 0.0
+        if self.scene_detector:
+            scene_result = self.scene_detector.detect(file_info.path, full_content)
+            detected_scene = scene_result.scene
+            scene_confidence = scene_result.confidence
+            self._log(
+                f"Detected scene for {file_info.path.name}: {detected_scene.value} "
+                f"(confidence: {scene_confidence:.2f})"
+            )
+        
+        # 4. 检查缓存
+        cache_key = self._generate_cache_key(file_info, content_chunks, detected_scene)
         cached_result = self._check_cache(cache_key)
         if cached_result:
             self.stats["cache_hits"] += 1
@@ -131,34 +183,51 @@ class Executor:
         
         self.stats["cache_misses"] += 1
         
-        # 3. 选择提示词策略
+        # 5. 选择提示词策略
         prompt_strategy = self._select_prompt_strategy(file_info)
         
-        # 4. 构建提示词
-        if len(content_chunks) == 1:
-            # 小文件：直接处理
-            prompt = self._build_prompt_single(file_info, content_chunks[0], context)
+        # 6. 构建提示词（使用场景模板或默认模板）
+        if detected_scene and self.scene_detector:
+            # 使用场景化提示词
+            template = self.scene_detector.get_template(detected_scene)
+            if len(content_chunks) == 1:
+                prompt = self._build_scene_prompt(
+                    template, file_info, content_chunks[0], context
+                )
+            else:
+                prompt = self._build_scene_prompt_chunked(
+                    template, file_info, content_chunks, context
+                )
         else:
-            # 大文件：分块处理 + 汇总
-            prompt = self._build_prompt_chunked(file_info, content_chunks, context)
+            # 使用默认提示词
+            if len(content_chunks) == 1:
+                prompt = self._build_prompt_single(file_info, content_chunks[0], context)
+            else:
+                prompt = self._build_prompt_chunked(file_info, content_chunks, context)
         
-        # 5. 调用 LLM
+        # 7. 调用 LLM
         raw_output = self._call_llm(prompt, context)
         
-        # 6. 解析输出
-        note = self._parse_output(raw_output, file_info, context)
+        # 8. 解析输出（使用场景化格式化）
+        if detected_scene and self.scene_detector:
+            template = self.scene_detector.get_template(detected_scene)
+            note = self._parse_scene_output(raw_output, file_info, context, template)
+        else:
+            note = self._parse_output(raw_output, file_info, context)
         
-        # 7. 记录处理过程
+        # 9. 记录处理过程
         note.processing_info = {
             "session_id": context.session_id,
             "iteration": context.iteration,
             "prompt_strategy": prompt_strategy,
+            "detected_scene": detected_scene.value if detected_scene else None,
+            "scene_confidence": scene_confidence,
             "chunks_processed": len(content_chunks),
             "cache_key": cache_key,
             "timestamp": datetime.now().isoformat(),
         }
         
-        # 8. 缓存结果
+        # 10. 缓存结果
         self._cache_result(cache_key, note)
         
         return note
@@ -312,11 +381,12 @@ class Executor:
         
         return chunks
     
-    def _generate_cache_key(self, file_info, content_chunks: List[str]) -> str:
+    def _generate_cache_key(self, file_info, content_chunks: List[str], scene: Optional[DocumentScene] = None) -> str:
         """生成缓存键"""
-        # 基于文件哈希 + 提示词模板版本 + LLM 配置
+        # 基于文件哈希 + 提示词模板版本 + LLM 配置 + 场景
+        scene_str = scene.value if scene else "default"
         content_hash = hashlib.md5(
-            (file_info.hash + str(self.llm_config)).encode()
+            (file_info.hash + scene_str + str(self.llm_config)).encode()
         ).hexdigest()
         return content_hash
     
@@ -360,6 +430,78 @@ class Executor:
     def _select_prompt_strategy(self, file_info) -> str:
         """选择提示词策略"""
         return self.PROMPT_TEMPLATES.get(file_info.type, "default")
+    
+    def _build_scene_prompt(self, template, file_info, content: str, context: ExecutionContext) -> str:
+        """构建场景化单块提示词"""
+        return template.prompt_template.format(
+            filename=file_info.path.name,
+            file_type=file_info.type,
+            content=content[:self.CHUNK_SIZE]
+        )
+    
+    def _build_scene_prompt_chunked(self, template, file_info, chunks: List[str], context: ExecutionContext) -> str:
+        """构建场景化分块提示词"""
+        chunks_text = "\n\n".join([
+            f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
+            for i, chunk in enumerate(chunks)
+        ])
+        
+        # 在模板中替换内容部分
+        prompt = template.prompt_template.format(
+            filename=file_info.path.name,
+            file_type=file_info.type,
+            content=f"[This is a large document split into {len(chunks)} parts]\n\n{chunks_text}"
+        )
+        return prompt
+    
+    def _parse_scene_output(self, raw_output: str, file_info, context: ExecutionContext, template) -> NoteOutput:
+        """解析场景化 LLM 输出"""
+        try:
+            # 提取 JSON 部分
+            json_str = self._extract_json(raw_output)
+            data = json.loads(json_str)
+            
+            # 使用场景化格式化函数
+            if template.formatter:
+                content = template.formatter(data)
+            else:
+                content = self._to_markdown(data)
+            
+            return NoteOutput(
+                title=data.get("title", file_info.path.stem),
+                content=content,
+                tags=data.get("tags", []),
+                links=data.get("suggested_links", []),
+                source=str(file_info.path),
+                metadata={
+                    **data.get("metadata", {}),
+                    "scene": template.scene.value,
+                },
+                processing_info={
+                    "session_id": context.session_id,
+                    "iteration": context.iteration,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
+            
+        except (json.JSONDecodeError, ValueError) as e:
+            self._log(
+                f"Failed to parse scene output for {file_info.path}: {e}",
+                level="warning"
+            )
+            return NoteOutput(
+                title=file_info.path.stem,
+                content=raw_output,
+                tags=["parse_error"],
+                links=[],
+                source=str(file_info.path),
+                metadata={"error": "parse_failed", "error_detail": str(e)},
+                processing_info={
+                    "session_id": context.session_id,
+                    "iteration": context.iteration,
+                    "timestamp": datetime.now().isoformat(),
+                }
+            )
     
     def _build_prompt_single(self, file_info, content: str, context: ExecutionContext) -> str:
         """构建单块提示词"""

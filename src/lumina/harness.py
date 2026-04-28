@@ -26,6 +26,7 @@ from .utils.file_operations import (
     write_file_with_metadata, read_file_with_metadata, FileMetadata,
     check_write_permission, check_sensitive_content, is_file_modified
 )
+from .document_cluster import DocumentCluster, DocumentClusterer, ClusterResult, ClusterStrategy
 
 
 
@@ -56,6 +57,11 @@ class HarnessConfig:
     progress_callback: Optional[Any] = None  # 进度回调函数
     error_handler: Optional[Any] = None  # 错误处理器实例
     supported_extensions: List[str] = field(default_factory=list)  # 允许处理的文件扩展名
+    
+    # 新增功能配置（默认启用）
+    enable_clustering: bool = True  # 是否启用文档聚合
+    enable_content_filter: bool = True  # 是否启用内容过滤
+    enable_scene_detection: bool = True  # 是否启用场景检测
     
     # LLM 配置 - 分别为不同的 Agent 配置
     llm_config_planner: Optional[Dict[str, Any]] = None  # Planner 的 LLM 配置
@@ -149,12 +155,15 @@ class Harness:
         self.planner = Planner(
             cache_manager=self.cache, 
             history_manager=self.history,
-            llm_config=self.config.get_llm_config_for('planner')
+            llm_config=self.config.get_llm_config_for('planner'),
+            enable_clustering=self.config.enable_clustering
         )
         self.executor = Executor(
             llm_config=self.config.get_llm_config_for('executor'),
             cache_manager=self.cache,
-            history_manager=self.history
+            history_manager=self.history,
+            enable_content_filter=self.config.enable_content_filter,
+            enable_scene_detection=self.config.enable_scene_detection
         )
         self.validator = Validator(
             history_manager=self.history,
@@ -492,7 +501,11 @@ class Harness:
     
     def _process_single(self, file_info: FileInfo, plan) -> Dict[str, Any]:
         """
-        处理单个文件，包含完整的迭代优化流程
+        处理单个文件或文档簇，包含完整的迭代优化流程
+        
+        增强功能：
+        1. 支持文档簇聚合处理
+        2. 保留关联关系
         
         流程：
         1. 检查缓存 → 命中则直接返回
@@ -504,7 +517,15 @@ class Harness:
         """
         file_start = time.time()
         file_path_str = str(file_info.path)
-        self._log(f"\n📄 Processing: {file_path_str}")
+        
+        # 检查是否为文档簇
+        is_cluster = file_info.metadata.get("is_cluster", False)
+        
+        if is_cluster:
+            self._log(f"\n📦 Processing cluster: {file_info.metadata.get('cluster_title', 'Unknown')}")
+            self._log(f"   Files in cluster: {len(file_info.metadata.get('cluster_files', []))}")
+        else:
+            self._log(f"\n📄 Processing: {file_path_str}")
         
         # 更新进度追踪器
         if self.progress_tracker:
@@ -552,31 +573,61 @@ class Harness:
                     previous_validation=best_validation,
                 )
                 
-                # 执行（生成/修复内容）- 使用 GracefulDegradation
-                with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context=f"Executor round {iteration+1}", handler=self.error_handler) as gd:
-                    if iteration == 0:
-                        gd.result = self.executor.execute(context)
-                    else:
-                        gd.result = self.executor.revise(context)
-                
-                current_output = gd.result
-                if current_output is None:
-                    self._log(f"⚠️  Failed to generate output in round {iteration+1}, skipping iteration", level="warning")
-                    if self.error_handler:
-                        self.state.errors.append({"file": file_path_str, "error": f"Failed to generate output in round {iteration+1}"})
-                    continue
-                
-                all_outputs.append(current_output)
-                
-                # 快速验证（只检查基础规则，不调用 LLM）
-                quick_validation = None
-                if iteration == 0 and self.config.quick_validation_first:
-                    with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context="Quick validation", handler=self.error_handler) as gd:
-                        gd.result = self.validator.validate_quick(current_output)
-                    quick_validation = gd.result
+                # 如果是文档簇，需要特殊处理
+                if is_cluster:
+                    note = self._execute_cluster(file_info, context)
+                    current_output = note
+                    all_outputs.append(current_output)
                     
-                    if quick_validation and not quick_validation.passed and quick_validation.score < 0.5:
-                        self._log(f"⚠️  Quick validation failed (score={quick_validation.score:.2f}), "
+                    # 文档簇跳过验证流程，直接返回
+                    best_output = current_output
+                    best_score = 0.8  # 聚合文档默认质量分
+                    
+                    iteration_result = {
+                        "round": iteration + 1,
+                        "output": {
+                            "title": current_output.title,
+                            "content_length": len(current_output.content),
+                            "tags": current_output.tags,
+                            "links": current_output.links,
+                        },
+                        "validation": {
+                            "score": best_score,
+                            "passed": True,
+                            "issue_count": 0,
+                            "error_count": 0,
+                            "warning_count": 0,
+                        },
+                        "duration": time.time() - iter_start,
+                    }
+                    iteration_history.append(iteration_result)
+                    break  # 文档簇只处理一轮
+                else:
+                    # 执行（生成/修复内容）- 使用 GracefulDegradation
+                    with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context=f"Executor round {iteration+1}", handler=self.error_handler) as gd:
+                        if iteration == 0:
+                            gd.result = self.executor.execute(context)
+                        else:
+                            gd.result = self.executor.revise(context)
+                    
+                    current_output = gd.result
+                    if current_output is None:
+                        self._log(f"⚠️  Failed to generate output in round {iteration+1}, skipping iteration", level="warning")
+                        if self.error_handler:
+                            self.state.errors.append({"file": file_path_str, "error": f"Failed to generate output in round {iteration+1}"})
+                        continue
+                    
+                    all_outputs.append(current_output)
+                    
+                    # 快速验证（只检查基础规则，不调用 LLM）
+                    quick_validation = None
+                    if iteration == 0 and self.config.quick_validation_first:
+                        with GracefulDegradation(fallback=None, severity=ErrorSeverity.WARNING, context="Quick validation", handler=self.error_handler) as gd:
+                            gd.result = self.validator.validate_quick(current_output)
+                        quick_validation = gd.result
+                        
+                        if quick_validation and not quick_validation.passed and quick_validation.score < 0.5:
+                            self._log(f"⚠️  Quick validation failed (score={quick_validation.score:.2f}), "
                                  f"re-trying with better prompt")
                 
                 # 完整验证
@@ -936,6 +987,79 @@ class Harness:
             ],
             "errors": self.state.errors,
         }
+    
+    def _execute_cluster(self, file_info: FileInfo, context: ExecutionContext) -> NoteOutput:
+        """
+        执行文档簇处理
+        
+        将多个相关短文档合并为一篇笔记，保留关联关系
+        """
+        cluster_files = file_info.metadata.get("cluster_files", [])
+        cluster_strategy = file_info.metadata.get("cluster_strategy", "combine_short_docs")
+        cluster_title = file_info.metadata.get("cluster_title", "Combined Notes")
+        
+        if not cluster_files:
+            return NoteOutput(
+                title="Empty Cluster",
+                content="_No files in cluster_",
+                tags=["error"],
+                links=[],
+                source=str(file_info.path),
+                metadata={"error": "empty_cluster"},
+            )
+        
+        # 读取所有文件内容
+        file_contents = {}
+        for file_path_str in cluster_files:
+            file_path = Path(file_path_str)
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    file_contents[file_path_str] = f.read()
+            except Exception as e:
+                file_contents[file_path_str] = f"[Error reading: {e}]"
+        
+        # 使用 DocumentClusterer 格式化
+        from .document_cluster import DocumentCluster, DocumentClusterer, ClusterStrategy
+        
+        strategy_map = {
+            "combine_short_docs": ClusterStrategy.COMBINE_SHORT_DOCS,
+            "summarize_multiple": ClusterStrategy.SUMMARIZE_MULTIPLE,
+            "append_to_existing": ClusterStrategy.APPEND_TO_EXISTING,
+        }
+        
+        cluster = DocumentCluster(
+            cluster_id=file_info.metadata.get("cluster_id", "unknown"),
+            files=[Path(f) for f in cluster_files],
+            strategy=strategy_map.get(cluster_strategy, ClusterStrategy.COMBINE_SHORT_DOCS),
+            title=cluster_title,
+            description=file_info.metadata.get("cluster_description"),
+        )
+        
+        clusterer = DocumentClusterer()
+        result = clusterer.format_cluster(cluster, file_contents)
+        
+        # 构建 NoteOutput
+        note = NoteOutput(
+            title=result.title,
+            content=result.content,
+            tags=result.tags,
+            links=[],
+            source=str(file_info.path),
+            metadata={
+                **result.metadata,
+                "is_cluster": True,
+                "cluster_files": cluster_files,
+                "cluster_strategy": cluster_strategy,
+            },
+            processing_info={
+                "session_id": context.session_id,
+                "iteration": context.iteration,
+                "cluster_id": cluster.cluster_id,
+                "timestamp": datetime.now().isoformat(),
+            }
+        )
+        
+        return note
     
     def _log(self, message: str, level: str = "info"):
         """输出日志"""
