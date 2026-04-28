@@ -326,6 +326,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
         output_dir=output or str(lumina_config.output.resolve_base_dir()),
         vault_path=str(lumina_config.output.resolve_vault_path()) if lumina_config.output.vault_path else None,
         plugin=lumina_config.output.plugin,
+        supported_extensions=lumina_config.supported_extensions,
         incremental=incremental,
         parallel=parallel,
         enable_vector_store=vector,
@@ -423,6 +424,7 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
         output_dir=output or str(lumina_config.output.resolve_base_dir()),
         vault_path=str(lumina_config.output.resolve_vault_path()) if lumina_config.output.vault_path else None,
         plugin=lumina_config.output.plugin,
+        supported_extensions=lumina_config.supported_extensions,
         incremental=True,
         parallel=parallel,
         enable_vector_store=vector,
@@ -507,7 +509,7 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
     click.echo(f"🌐 Lumina 常驻服务已启动: http://{host}:{port}")
     click.echo("💡 停止服务请按 Ctrl+C")
 
-    web = WebInterface(harness=harness, host=host, port=port)
+    web = WebInterface(harness=harness, host=host, port=port, lumina_config=lumina_config)
     try:
         web.run(debug=False)
     finally:

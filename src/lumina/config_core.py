@@ -21,6 +21,10 @@ from .llm import LLMConfig as LLMProviderConfig
 # 配置路径常量
 USER_CONFIG_DIR = Path.home() / ".lumina"
 USER_CONFIG_FILE = USER_CONFIG_DIR / "lumina.yaml"
+DEFAULT_SUPPORTED_EXTENSIONS = [
+    ".md", ".txt", ".sql", ".pdf", ".py", ".js", ".ts",
+    ".json", ".yaml", ".yml", ".png", ".jpg"
+]
 
 
 @dataclass
@@ -109,10 +113,7 @@ class LuminaConfig:
     # 输入配置
     input_sources: List[InputSource] = field(default_factory=list)
     default_recursive: bool = True
-    supported_extensions: List[str] = field(default_factory=lambda: [
-        ".md", ".txt", ".pdf", ".py", ".js", ".ts",
-        ".json", ".yaml", ".yml", ".png", ".jpg"
-    ])
+    supported_extensions: List[str] = field(default_factory=lambda: DEFAULT_SUPPORTED_EXTENSIONS.copy())
 
     # 输出配置
     output: OutputConfig = field(default_factory=OutputConfig)
@@ -174,9 +175,11 @@ class LuminaConfig:
     @classmethod
     def _from_dict(cls, data: Dict[str, Any]) -> "LuminaConfig":
         """从字典创建配置（未提供的字段使用默认值）"""
+        input_data = data.get("input", {})
+
         # 解析输入源
         sources = []
-        for source in data.get("input", {}).get("sources", []):
+        for source in input_data.get("sources", []):
             sources.append(InputSource(
                 path=source["path"],
                 recursive=source.get("recursive", True),
@@ -217,8 +220,8 @@ class LuminaConfig:
 
         return cls(
             input_sources=sources,
-            default_recursive=data.get("input", {}).get("default_recursive", True),
-            supported_extensions=data.get("input", {}).get("supported_extensions", []),
+            default_recursive=input_data.get("default_recursive", True),
+            supported_extensions=input_data.get("supported_extensions", DEFAULT_SUPPORTED_EXTENSIONS.copy()),
             output=output_config,
             harness=data.get("harness", {}),
             service=service_data,

@@ -21,6 +21,7 @@ def detect_file_type(file_path: Path) -> str:
     type_map = {
         '.md': 'markdown',
         '.txt': 'text',
+        '.sql': 'text',
         '.pdf': 'pdf',
         '.py': 'code',
         '.js': 'code',

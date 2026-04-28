@@ -98,8 +98,41 @@ class Planner:
             "unchanged_files": 0,
             "total_estimated_cost": 0,
         }
+
+    @staticmethod
+    def is_supported_extension(file_path: Path, supported_extensions: Optional[List[str]] = None) -> bool:
+        """检查文件扩展名是否在允许列表中"""
+        if not supported_extensions:
+            return True
+        normalized_extensions = {ext.lower() for ext in supported_extensions}
+        return file_path.suffix.lower() in normalized_extensions
+
+    @staticmethod
+    def matches_file_filter(file_path: Path, root_path: Path, file_filter: Optional[str] = None) -> bool:
+        """检查文件是否匹配 glob 过滤规则"""
+        patterns = [p.strip() for p in (file_filter or "").split(",") if p.strip()]
+        if not patterns:
+            return True
+
+        try:
+            relative_path = file_path.relative_to(root_path)
+        except ValueError:
+            relative_path = file_path
+
+        relative_text = str(relative_path)
+        full_text = str(file_path)
+        for pattern in patterns:
+            if (
+                fnmatch.fnmatch(file_path.name, pattern)
+                or fnmatch.fnmatch(relative_text, pattern)
+                or fnmatch.fnmatch(full_text, pattern)
+                or file_path.match(pattern)
+                or relative_path.match(pattern)
+            ):
+                return True
+        return False
     
-    def scan(self, input_path: str, recursive: bool = True, file_filter: Optional[str] = None) -> List[FileInfo]:
+    def scan(self, input_path: str, recursive: bool = True, file_filter: Optional[str] = None, supported_extensions: Optional[List[str]] = None) -> List[FileInfo]:
         """
         扫描目录，返回文件信息列表
         
@@ -107,39 +140,17 @@ class Planner:
             input_path: 输入路径（文件或目录）
             recursive: 是否递归扫描
             file_filter: 文件过滤规则，支持 glob，多个模式可用逗号分隔
+            supported_extensions: 允许处理的文件扩展名列表
             
         Returns:
             文件信息列表
         """
         path = Path(input_path)
         files = []
-        patterns = [p.strip() for p in (file_filter or "").split(",") if p.strip()]
-
-        def matches_filter(file_path: Path) -> bool:
-            if not patterns:
-                return True
-
-            try:
-                relative_path = file_path.relative_to(path)
-            except ValueError:
-                relative_path = file_path
-
-            relative_text = str(relative_path)
-            full_text = str(file_path)
-            for pattern in patterns:
-                if (
-                    fnmatch.fnmatch(file_path.name, pattern)
-                    or fnmatch.fnmatch(relative_text, pattern)
-                    or fnmatch.fnmatch(full_text, pattern)
-                    or file_path.match(pattern)
-                    or relative_path.match(pattern)
-                ):
-                    return True
-            return False
         
         if path.is_file():
             # 单文件
-            if matches_filter(path):
+            if self.is_supported_extension(path, supported_extensions) and self.matches_file_filter(path, path.parent, file_filter):
                 file_info = self._analyze_file(path)
                 if file_info:
                     files.append(file_info)
@@ -148,7 +159,9 @@ class Planner:
             pattern = "**/*" if recursive else "*"
             for file_path in path.glob(pattern):
                 if file_path.is_file():
-                    if not matches_filter(file_path):
+                    if not self.is_supported_extension(file_path, supported_extensions):
+                        continue
+                    if not self.matches_file_filter(file_path, path, file_filter):
                         continue
                     file_info = self._analyze_file(file_path)
                     if file_info:

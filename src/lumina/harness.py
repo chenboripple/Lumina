@@ -55,6 +55,7 @@ class HarnessConfig:
     enable_error_handler: bool = True  # 是否启用错误处理增强
     progress_callback: Optional[Any] = None  # 进度回调函数
     error_handler: Optional[Any] = None  # 错误处理器实例
+    supported_extensions: List[str] = field(default_factory=list)  # 允许处理的文件扩展名
     
     # LLM 配置 - 分别为不同的 Agent 配置
     llm_config_planner: Optional[Dict[str, Any]] = None  # Planner 的 LLM 配置
@@ -331,7 +332,12 @@ class Harness:
                 self.progress_tracker.start_file("scanning")
                 self.progress_tracker.next_phase()
             
-            files = self.planner.scan(input_path, recursive, file_filter=file_filter)
+            files = self.planner.scan(
+                input_path,
+                recursive,
+                file_filter=file_filter,
+                supported_extensions=self.config.supported_extensions,
+            )
             self.state.total_files = len(files)
             self._log(f"📊 Found {len(files)} files total")
             
@@ -638,7 +644,9 @@ class Harness:
                     break
             
             # Step 3: 处理最终结果
-            final_passed = (best_validation.passed if best_validation else False) or self.config.allow_partial
+            final_passed = bool(best_output) and (
+                (best_validation.passed if best_validation else False) or self.config.allow_partial
+            )
             
             if not final_passed:
                 self._log(f"❌ Processing failed, quality did not meet threshold")
@@ -665,14 +673,17 @@ class Harness:
                 self.cache.set_processed_result(file_info.hash, json.dumps(cache_data))
             
             # Step 5: 标记文件为已处理（更新指纹）
-            try:
-                fingerprint = self.change_tracker.calculate_file_fingerprint(file_info.path)
-                self.change_tracker.mark_as_processed(fingerprint)
-                self._log(f"✅ Marked as processed: {file_info.path}")
-            except Exception as e:
-                self._log(f"⚠️  Failed to mark file as processed: {e}", level="warning")
-                if self.error_handler:
-                    self.error_handler.handle_error(e, severity=ErrorSeverity.WARNING, context="Mark file processed")
+            if best_output:
+                try:
+                    fingerprint = self.change_tracker.calculate_file_fingerprint(file_info.path)
+                    self.change_tracker.mark_as_processed(fingerprint)
+                    self._log(f"✅ Marked as processed: {file_info.path}")
+                except Exception as e:
+                    self._log(f"⚠️  Failed to mark file as processed: {e}", level="warning")
+                    if self.error_handler:
+                        self.error_handler.handle_error(e, severity=ErrorSeverity.WARNING, context="Mark file processed")
+            else:
+                self._log(f"⚠️  Skipping processed mark for {file_info.path} because no output was generated", level="warning")
             
             # 计算成本
             exec_stats = self.executor.get_stats()
@@ -695,7 +706,7 @@ class Harness:
                     "modified": file_info.modified,
                     "hash": file_info.hash,
                 },
-                "processed": True,
+                "processed": best_output is not None,
                 "cached": False,
                 "final_passed": final_passed,
                 "iterations": len(iteration_history),
@@ -962,9 +973,10 @@ class Harness:
         self._log(f"💰 Estimated Cost: ${stats['estimated_total_cost']:.4f}")
         
         self._log("\n📈 Score Distribution:")
+        max_distribution_count = max(stats['score_distribution'].values(), default=1)
         for grade, count in stats['score_distribution'].items():
             if count > 0:
-                bar = "█" * int(count / max(stats['score_distribution'].values(), 1) * 20)
+                bar = "█" * int(count / max_distribution_count * 20)
                 self._log(f"  {grade}: {count:2d} {bar}")
         
         errors = report.get("errors", [])

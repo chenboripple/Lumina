@@ -348,6 +348,7 @@ async function openNoteDetail(noteId) {
 
         modal.classList.remove('hidden');
         modal.dataset.noteId = noteId;
+        modal.dataset.sourcePath = note.source_path || '';
 
     } catch (error) {
         console.error('Failed to load note detail:', error);
@@ -360,18 +361,20 @@ async function openNoteDetail(noteId) {
 function closeModal() {
     modal.classList.add('hidden');
     delete modal.dataset.noteId;
+    delete modal.dataset.sourcePath;
 }
 
 async function regenerateNote() {
     const noteId = modal.dataset.noteId;
-    if (!noteId) return;
+    const sourcePath = modal.dataset.sourcePath;
+    if (!noteId || !sourcePath) return;
 
     showLoading(true);
 
     try {
         const result = await apiRequest(`/api/notes/${encodeURIComponent(noteId)}/regenerate`, {
             method: 'POST',
-            body: JSON.stringify({ source_path: noteId })
+            body: JSON.stringify({ source_path: sourcePath })
         });
 
         if (result.success) {
