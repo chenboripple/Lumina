@@ -110,8 +110,8 @@ class WebInterface:
         @self.app.route('/api/graph')
         def api_graph():
             """获取知识图谱数据"""
-            if not self.harness or not self.harness.vector_store:
-                return jsonify({"error": "Vector store not available"}), 503
+            if not self.harness:
+                return jsonify({"error": "Harness not available"}), 503
             
             try:
                 min_similarity = request.args.get('min_similarity', 0.7, type=float)

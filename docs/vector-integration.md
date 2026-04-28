@@ -37,6 +37,14 @@ pip install chromadb sentence-transformers
 pip install openai
 ```
 
+### 本地嵌入模式说明
+
+- 默认的 `embedding_provider` 是 `local`。
+- `local` 模式下，Lumina 会通过 `sentence-transformers` 在本地加载嵌入模型，再把文本转换成向量后写入 ChromaDB。
+- 默认本地模型是 `all-MiniLM-L6-v2`。如果本机还没有缓存这个模型，首次启用向量库时通常会联网下载模型文件。
+- 如果缺少 `sentence-transformers`，语义搜索和知识图谱接口会不可用或降级为空结果。
+- 如果不想依赖本地模型，可以切换到 `embedding_provider="openai"`，这时需要安装 `openai` 并配置可用的 Embedding API Key。
+
 ### 基本使用
 
 #### 1. 处理文件并自动索引
