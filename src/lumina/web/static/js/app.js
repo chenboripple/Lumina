@@ -132,6 +132,7 @@ async function loadDashboardData() {
         document.getElementById('stat-score').textContent = (stats.avg_score || 0).toFixed(2);
         document.getElementById('stat-vector').textContent = 
             stats.vector_store?.total_documents || 0;
+        renderRecentProcessedFiles(stats.recent_processed_files || []);
 
         // 更新状态显示
         const statusDisplay = document.getElementById('status-display');
@@ -145,6 +146,68 @@ async function loadDashboardData() {
         }
     } catch (error) {
         console.error('Failed to load dashboard data:', error);
+    }
+}
+
+function renderRecentProcessedFiles(files) {
+    const container = document.getElementById('processed-files-list');
+    if (!container) return;
+
+    if (!files || files.length === 0) {
+        container.innerHTML = '<p class="hint">暂无已处理记录</p>';
+        return;
+    }
+
+    // Group by parent directory
+    const groups = {};
+    files.forEach(item => {
+        const fp = item.file_path || '';
+        const sep = fp.lastIndexOf('/');
+        const dir = sep >= 0 ? fp.substring(0, sep) : '(根目录)';
+        if (!groups[dir]) groups[dir] = [];
+        groups[dir].push(item);
+    });
+
+    const dirCount = Object.keys(groups).length;
+    // Collapse by default when there are multiple directories or many files
+    const defaultCollapsed = dirCount > 1 || files.length > 8;
+
+    let html = '';
+    Object.entries(groups).forEach(([dir, items], idx) => {
+        const groupId = `pf-group-${idx}`;
+        const collapsed = defaultCollapsed;
+        const shortDir = dir.replace(/^\/Users\/[^/]+/, '~');
+        html += `
+        <div class="pf-dir-group">
+            <div class="pf-dir-header" onclick="togglePfGroup('${groupId}')">
+                <span class="pf-dir-arrow ${collapsed ? '' : 'expanded'}" id="${groupId}-arrow">▶</span>
+                <span class="pf-dir-name" title="${escapeHtml(dir)}">${escapeHtml(shortDir)}</span>
+                <span class="pf-dir-count">${items.length} 个文件</span>
+            </div>
+            <div class="pf-dir-files ${collapsed ? 'pf-collapsed' : ''}" id="${groupId}">
+                ${items.map(item => `
+                <div class="processed-file-item" title="${escapeHtml(item.file_path || '')}">
+                    <div class="processed-file-main">
+                        <div class="processed-file-name">${escapeHtml(item.file_name || 'unknown')}</div>
+                    </div>
+                    <div class="processed-file-meta">
+                        <div class="processed-file-time">${formatDateTime(item.last_processed_time)}</div>
+                        <div class="processed-file-version">v${item.processing_version || 0}</div>
+                    </div>
+                </div>`).join('')}
+            </div>
+        </div>`;
+    });
+    container.innerHTML = html;
+}
+
+function togglePfGroup(groupId) {
+    const el = document.getElementById(groupId);
+    const arrow = document.getElementById(groupId + '-arrow');
+    if (!el) return;
+    const collapsed = el.classList.toggle('pf-collapsed');
+    if (arrow) {
+        arrow.classList.toggle('expanded', !collapsed);
     }
 }
 
@@ -543,6 +606,18 @@ function formatDate(isoString) {
     if (!isoString) return '';
     const date = new Date(isoString);
     return date.toLocaleDateString('zh-CN');
+}
+
+function formatDateTime(isoString) {
+    if (!isoString) return '';
+    const date = new Date(isoString);
+    return date.toLocaleString('zh-CN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit'
+    });
 }
 
 // 启动

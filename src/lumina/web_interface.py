@@ -342,7 +342,8 @@ class WebInterface:
                 "available": False,
                 "total_documents": 0
             },
-            "recent_activity": []
+            "recent_activity": [],
+            "recent_processed_files": []
         }
         
         try:
@@ -361,6 +362,29 @@ class WebInterface:
                         "available": vector_stats.get("available", False),
                         "total_documents": vector_stats.get("total_documents", 0),
                     }
+                except Exception:
+                    pass
+
+                # 最近标记为已处理的文件（来自增量指纹）
+                try:
+                    source_roots = []
+                    if self.lumina_config:
+                        for source in self.lumina_config.input_sources:
+                            source_roots.append(source.resolve_path())
+
+                    recent_files = self.harness.change_tracker.get_recent_processed_files(
+                        limit=20,
+                        roots=source_roots or None,
+                    )
+                    stats["recent_processed_files"] = [
+                        {
+                            "file_path": item["file_path"],
+                            "file_name": Path(item["file_path"]).name,
+                            "last_processed_time": datetime.fromtimestamp(item["last_processed_time"]).isoformat(),
+                            "processing_version": item.get("processing_version", 0),
+                        }
+                        for item in recent_files
+                    ]
                 except Exception:
                     pass
         except Exception:

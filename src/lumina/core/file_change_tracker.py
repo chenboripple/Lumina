@@ -250,6 +250,44 @@ class FileChangeTracker:
             for fp in self._fingerprints.values() 
             if fp.last_processed_hash is not None
         ]
+
+    def get_recent_processed_files(self, limit: int = 20, roots: Optional[List[Path]] = None) -> List[Dict[str, Any]]:
+        """获取最近标记为已处理的文件记录，可按根路径过滤。"""
+        normalized_roots = []
+        if roots:
+            for root in roots:
+                try:
+                    normalized_roots.append(str(Path(root).resolve()))
+                except Exception:
+                    continue
+
+        recent = []
+        for fp in self._fingerprints.values():
+            if fp.last_processed_hash is None or fp.last_processed_time is None:
+                continue
+
+            try:
+                resolved_file = str(Path(fp.file_path).resolve())
+            except Exception:
+                resolved_file = fp.file_path
+
+            if normalized_roots:
+                in_scope = False
+                for root in normalized_roots:
+                    if resolved_file == root or resolved_file.startswith(root + os.sep):
+                        in_scope = True
+                        break
+                if not in_scope:
+                    continue
+
+            recent.append({
+                "file_path": resolved_file,
+                "last_processed_time": fp.last_processed_time,
+                "processing_version": fp.processing_version,
+            })
+
+        recent.sort(key=lambda item: item["last_processed_time"], reverse=True)
+        return recent[:limit]
     
     def get_unprocessed_files(self, files: List[Path]) -> List[Path]:
         """从文件列表中筛选出未处理或已修改的文件"""
