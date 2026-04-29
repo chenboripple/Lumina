@@ -15,6 +15,8 @@ from datetime import datetime
 
 from .cache import CacheManager
 from .utils.file_utils import get_file_hash, detect_file_type
+from .document_cluster import DocumentClusterer, ClusterStrategy
+from .content_filter import ContentFilter
 
 
 @dataclass
@@ -85,10 +87,13 @@ class Planner:
         'large': 1,   # 大文件（>1MB）
     }
     
-    def __init__(self, cache_manager: CacheManager = None, history_manager=None, llm_config: Dict[str, Any] = None):
+    def __init__(self, cache_manager: CacheManager = None, history_manager=None, llm_config: Dict[str, Any] = None, enable_clustering: bool = True):
         self.cache = cache_manager
         self.history = history_manager
         self.llm_config = llm_config or {}
+        
+        # 初始化文档聚合器
+        self.clusterer = DocumentClusterer() if enable_clustering else None
         
         # 统计信息
         self.stats = {
@@ -97,6 +102,8 @@ class Planner:
             "modified_files": 0,
             "unchanged_files": 0,
             "total_estimated_cost": 0,
+            "clusters_created": 0,
+            "files_in_clusters": 0,
         }
 
     @staticmethod
@@ -241,9 +248,13 @@ class Planner:
         # 简化判断：所有图片都尝试 OCR
         return True
     
-    def plan(self, files: List[FileInfo]) -> ProcessingPlan:
+    def plan(self, files: List[FileInfo], existing_notes: Optional[List[Dict[str, Any]]] = None) -> ProcessingPlan:
         """
         制定处理计划
+        
+        增强功能：
+        1. 文档聚合 - 将相关短文档合并处理
+        2. 保留关联关系
         
         Args:
             files: 文件信息列表
@@ -261,8 +272,60 @@ class Planner:
                 summary="No files to process"
             )
         
+        # 文档聚合
+        clustered_files = []
+        individual_files = []
+        
+        if self.clusterer:
+            file_paths = [f.path for f in files]
+            clusters, individual = self.clusterer.cluster(file_paths, existing_notes=existing_notes)
+            
+            # 将聚类结果转换为 FileInfo
+            for cluster in clusters:
+                # 创建一个代表整个簇的 FileInfo
+                cluster_info = FileInfo(
+                    path=cluster.files[0],  # 以第一个文件为代表
+                    type="cluster",
+                    size=sum(f.stat().st_size for f in cluster.files if f.exists()),
+                    modified=max(f.stat().st_mtime for f in cluster.files if f.exists()),
+                    hash=hashlib.md5("|".join(sorted(str(f) for f in cluster.files)).encode("utf-8")).hexdigest(),
+                    metadata={
+                        "filename": f"cluster_{cluster.cluster_id}",
+                        "extension": ".cluster",
+                        "is_cluster": True,
+                        "cluster_id": cluster.cluster_id,
+                        "cluster_files": [str(f) for f in cluster.files],
+                        "cluster_strategy": cluster.strategy.value,
+                        "cluster_title": cluster.title,
+                        "cluster_description": cluster.description,
+                    },
+                    processing_priority=1,  # 簇优先处理
+                    estimated_cost=sum(
+                        self._estimate_cost(f, detect_file_type(f))
+                        for f in cluster.files
+                    ),
+                    estimated_time=0,
+                    required_capabilities=[],
+                )
+                clustered_files.append(cluster_info)
+            
+            # 保留独立文件
+            for path in individual:
+                for file_info in files:
+                    if file_info.path == path:
+                        individual_files.append(file_info)
+                        break
+            
+            self.stats["clusters_created"] = len(clusters)
+            self.stats["files_in_clusters"] = sum(len(c.files) for c in clusters)
+        else:
+            individual_files = files
+        
+        # 合并所有待处理文件
+        all_files = clustered_files + individual_files
+        
         # 按优先级排序
-        sorted_files = sorted(files, key=lambda f: (
+        sorted_files = sorted(all_files, key=lambda f: (
             f.processing_priority,
             -f.estimated_cost,  # 成本高的优先（大文件优先）
         ))
@@ -271,19 +334,19 @@ class Planner:
         batches = self._create_batches(sorted_files)
         
         # 计算总计
-        total_cost = sum(f.estimated_cost for f in files)
-        total_time = sum(f.estimated_time for f in files)
+        total_cost = sum(f.estimated_cost for f in all_files)
+        total_time = sum(f.estimated_time for f in all_files)
         
         # 生成策略名称
-        strategy = self._determine_strategy(files)
+        strategy = self._determine_strategy(all_files)
         
         # 生成摘要
-        summary = self._generate_summary(files, batches, total_cost, total_time)
+        summary = self._generate_summary(all_files, batches, total_cost, total_time)
         
         self.stats["total_estimated_cost"] = total_cost
         
         return ProcessingPlan(
-            total_files=len(files),
+            total_files=len(all_files),
             total_estimated_cost=total_cost,
             total_estimated_time=total_time,
             strategy=strategy,
