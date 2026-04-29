@@ -7,7 +7,9 @@ const state = {
     currentView: 'dashboard',
     notes: [],
     graph: null,
-    isProcessing: false
+    isProcessing: false,
+    scanStatus: null,
+    selectedFailureIds: []
 };
 
 // API 基础 URL
@@ -24,16 +26,27 @@ const views = {
 
 const navButtons = document.querySelectorAll('.nav-btn');
 const modal = document.getElementById('note-modal');
+const failureModal = document.getElementById('failure-modal');
 const loadingOverlay = document.getElementById('loading-overlay');
 let scanPollTimer = null;
+let scanStatusTicker = null;
 
 // 初始化
 function init() {
     setupNavigation();
     setupEventListeners();
     loadDashboardData();
+    startScanStatusTicker();
     loadNotes();
     loadConfig();
+}
+
+function startScanStatusTicker() {
+    if (scanStatusTicker) {
+        clearInterval(scanStatusTicker);
+    }
+    updateScanStatus();
+    scanStatusTicker = setInterval(updateScanStatus, 2000);
 }
 
 // 导航切换
@@ -76,6 +89,20 @@ function setupEventListeners() {
     document.getElementById('btn-close-modal').addEventListener('click', closeModal);
     document.getElementById('btn-close-modal-2').addEventListener('click', closeModal);
     document.getElementById('btn-regenerate').addEventListener('click', regenerateNote);
+    const failureClose1 = document.getElementById('btn-close-failure-modal');
+    const failureClose2 = document.getElementById('btn-close-failure-modal-2');
+    if (failureClose1) failureClose1.addEventListener('click', closeFailureModal);
+    if (failureClose2) failureClose2.addEventListener('click', closeFailureModal);
+    const failureSelectAll = document.getElementById('failure-select-all');
+    const failureTagBtn = document.getElementById('btn-failure-tag');
+    const failureExportBtn = document.getElementById('btn-failure-export');
+    const failureRegenerateBtn = document.getElementById('btn-failure-regenerate');
+    const failureDeleteBtn = document.getElementById('btn-failure-delete');
+    if (failureSelectAll) failureSelectAll.addEventListener('change', toggleSelectAllFailures);
+    if (failureTagBtn) failureTagBtn.addEventListener('click', batchTagFailures);
+    if (failureExportBtn) failureExportBtn.addEventListener('click', exportSelectedFailures);
+    if (failureRegenerateBtn) failureRegenerateBtn.addEventListener('click', batchRegenerateFailures);
+    if (failureDeleteBtn) failureDeleteBtn.addEventListener('click', batchDeleteFailures);
 
     // 相似度滑块
     document.getElementById('similarity-slider').addEventListener('input', (e) => {
@@ -154,17 +181,348 @@ async function loadDashboardData() {
             stats.vector_store?.total_documents || 0;
         renderProcessedFiles(stats.recent_processed_files || []);
 
-        const statusDisplay = document.getElementById('status-display');
-        if (stats.status && stats.status !== 'idle') {
-            statusDisplay.innerHTML = `
-                <div class="status-active">
-                    <span class="status-indicator"></span>
-                    status: ${stats.status}
-                </div>
-            `;
-        }
+        await updateScanStatus();
     } catch (error) {
         console.error('Failed to load dashboard data:', error);
+    }
+}
+
+async function updateScanStatus() {
+    try {
+        const response = await fetch('/api/scan/status');
+        if (!response.ok) return;
+        const status = await response.json();
+        state.scanStatus = status || null;
+        renderScanStatus(status || {});
+        if (failureModal && !failureModal.classList.contains('hidden')) {
+            renderFailureModalBody();
+        }
+    } catch (_) {
+        // keep current status panel as-is on transient failures
+    }
+}
+
+function renderScanStatus(status) {
+    const container = document.getElementById('status-display');
+    if (!container) return;
+
+    const sourceCounts = status.source_counts || {};
+    const fileCounts = status.file_counts || {};
+    const queue = Array.isArray(status.queue) ? status.queue : [];
+    const progress = Number(status.progress_percent || 0);
+    const currentSource = status.current_source || '';
+    const running = Boolean(status.running);
+    const message = status.message || (running ? '扫描中...' : '等待处理...');
+    const etaSeconds = status.eta_seconds;
+    const elapsedSeconds = Number(status.elapsed_seconds || 0);
+    const ratePerMinute = Number(status.rate_per_minute || 0);
+    const failedItems = Array.isArray(status.failed_items) ? status.failed_items : [];
+
+    if (!running && queue.length === 0) {
+        container.innerHTML = '<p class="status-idle">等待处理...</p>';
+        return;
+    }
+
+    const queueHtml = queue.map((item, idx) => {
+        const itemProgress = Number(item.progress_percent || 0);
+        const itemStatus = item.status || 'pending';
+        const labelMap = {
+            pending: '待处理',
+            processing: '处理中',
+            completed: '已完成',
+            failed: '失败'
+        };
+        const label = labelMap[itemStatus] || itemStatus;
+        const sourceName = (item.source || `源 ${idx + 1}`).split('/').pop();
+
+        return `
+            <div class="queue-item ${itemStatus}">
+                <div class="queue-item-top">
+                    <span class="queue-source" title="${escapeHtml(item.source || '')}">${escapeHtml(sourceName)}</span>
+                    <span class="queue-badge ${itemStatus}">${label}</span>
+                </div>
+                <div class="queue-item-meta">${item.completed || 0}/${item.total_files || 0}（成功 ${item.processed || 0} / 失败 ${item.failed || 0}）</div>
+                <div class="queue-mini-progress"><span style="width:${Math.max(0, Math.min(100, itemProgress)).toFixed(1)}%"></span></div>
+            </div>
+        `;
+    }).join('');
+
+    container.innerHTML = `
+        <div class="queue-summary">
+            <div class="queue-summary-top">
+                <div class="status-active ${running ? 'running' : 'stopped'}">
+                    <span class="status-indicator"></span>
+                    ${running ? '处理中' : '已停止'}
+                </div>
+                <div class="queue-message">${escapeHtml(message)}</div>
+            </div>
+            <div class="queue-progress-row">
+                <div class="queue-progress-bar">
+                    <span style="width:${Math.max(0, Math.min(100, progress)).toFixed(1)}%"></span>
+                </div>
+                <div class="queue-progress-text">${progress.toFixed(1)}%</div>
+            </div>
+            <div class="queue-counters">
+                <span>源文件队列: 待处理 ${sourceCounts.pending || 0}</span>
+                <span>处理中 ${sourceCounts.processing || 0}</span>
+                <span>已完成 ${sourceCounts.completed || 0}</span>
+                <span>失败 ${sourceCounts.failed || 0}</span>
+            </div>
+            <div class="queue-counters secondary">
+                <span>文件: 待处理 ${fileCounts.pending || 0}</span>
+                <span>已完成 ${fileCounts.completed || 0}</span>
+                <span>成功 ${fileCounts.processed || 0}</span>
+                <span>失败 ${fileCounts.failed || 0}</span>
+            </div>
+            <div class="queue-counters tertiary">
+                <span>速度 ${ratePerMinute > 0 ? `${ratePerMinute.toFixed(1)} 项/分钟` : '计算中'}</span>
+                <span>已耗时 ${formatDuration(elapsedSeconds)}</span>
+                <span>预计剩余 ${etaSeconds == null ? '计算中' : formatDuration(etaSeconds)}</span>
+            </div>
+            ${currentSource ? `<div class="queue-current">当前: ${escapeHtml(currentSource)}</div>` : ''}
+            ${failedItems.length ? `
+                <div class="queue-failure-actions">
+                    <button class="btn btn-secondary btn-sm" id="btn-view-failures">查看失败详情 (${failedItems.length})</button>
+                </div>
+            ` : ''}
+        </div>
+        <div class="queue-list">
+            ${queueHtml || '<p class="hint">暂无队列项</p>'}
+        </div>
+    `;
+
+    const failureBtn = document.getElementById('btn-view-failures');
+    if (failureBtn) {
+        failureBtn.addEventListener('click', openFailureModal);
+    }
+}
+
+function openFailureModal() {
+    if (!failureModal) return;
+    const failedItems = Array.isArray(state.scanStatus?.failed_items) ? state.scanStatus.failed_items : [];
+    state.selectedFailureIds = failedItems.map(item => item.id);
+    renderFailureModalBody();
+    failureModal.classList.remove('hidden');
+}
+
+function closeFailureModal() {
+    if (failureModal) {
+        failureModal.classList.add('hidden');
+    }
+    state.selectedFailureIds = [];
+}
+
+function renderFailureModalBody() {
+    const failedItems = Array.isArray(state.scanStatus?.failed_items) ? state.scanStatus.failed_items : [];
+    const body = document.getElementById('failure-modal-body');
+    const selectAll = document.getElementById('failure-select-all');
+    if (!body) return;
+
+    if (selectAll) {
+        selectAll.checked = failedItems.length > 0 && state.selectedFailureIds.length === failedItems.length;
+    }
+
+    if (!failedItems.length) {
+        body.innerHTML = '<p class="hint">当前没有失败项。</p>';
+        return;
+    }
+
+    body.innerHTML = failedItems.map((item, index) => {
+        const checked = state.selectedFailureIds.includes(item.id) ? 'checked' : '';
+        const tags = Array.isArray(item.tags) ? item.tags : [];
+        const status = item.status || 'open';
+        const statusLabel = {
+            open: '未处理',
+            resolved: '已解决',
+            retry_failed: '重试失败'
+        }[status] || status;
+
+        return `
+            <div class="failure-item ${status}">
+                <div class="failure-item-header">
+                    <label class="failure-check">
+                        <input type="checkbox" class="failure-checkbox" data-id="${escapeHtml(item.id)}" ${checked}>
+                        <span class="failure-item-title">失败项 ${index + 1}</span>
+                    </label>
+                    <span class="queue-badge ${status === 'resolved' ? 'completed' : status === 'retry_failed' ? 'failed' : 'pending'}">${statusLabel}</span>
+                </div>
+                <div class="failure-item-row"><span class="failure-label">源:</span> <span>${escapeHtml(item.source || '-')}</span></div>
+                <div class="failure-item-row"><span class="failure-label">文件:</span> <span>${escapeHtml(item.file || '-')}</span></div>
+                <div class="failure-item-row"><span class="failure-label">错误:</span> <span>${escapeHtml(item.message || item.last_error || '未知错误')}</span></div>
+                ${tags.length ? `<div class="failure-item-row"><span class="failure-label">标签:</span> <span>${tags.map(tag => `<span class="tag">#${escapeHtml(tag)}</span>`).join(' ')}</span></div>` : ''}
+                <div class="failure-item-actions">
+                    <button class="btn btn-secondary btn-sm failure-copy-path" data-id="${escapeHtml(item.id)}">复制路径</button>
+                    <button class="btn btn-secondary btn-sm failure-copy-error" data-id="${escapeHtml(item.id)}">复制错误信息</button>
+                </div>
+            </div>
+        `;
+    }).join('');
+
+    body.querySelectorAll('.failure-checkbox').forEach(el => {
+        el.addEventListener('change', () => toggleFailureSelection(el.dataset.id, el.checked));
+    });
+    body.querySelectorAll('.failure-copy-path').forEach(el => {
+        el.addEventListener('click', () => {
+            const item = findFailureItemById(el.dataset.id);
+            copyFailureValue(item?.file || '', '路径已复制');
+        });
+    });
+    body.querySelectorAll('.failure-copy-error').forEach(el => {
+        el.addEventListener('click', () => {
+            const item = findFailureItemById(el.dataset.id);
+            copyFailureValue(item?.message || item?.last_error || '', '错误信息已复制');
+        });
+    });
+}
+
+function findFailureItemById(id) {
+    return (state.scanStatus?.failed_items || []).find(item => item.id === id) || null;
+}
+
+function toggleFailureSelection(id, checked) {
+    const selected = new Set(state.selectedFailureIds);
+    if (checked) {
+        selected.add(id);
+    } else {
+        selected.delete(id);
+    }
+    state.selectedFailureIds = Array.from(selected);
+    const failedItems = Array.isArray(state.scanStatus?.failed_items) ? state.scanStatus.failed_items : [];
+    const selectAll = document.getElementById('failure-select-all');
+    if (selectAll) {
+        selectAll.checked = failedItems.length > 0 && state.selectedFailureIds.length === failedItems.length;
+    }
+}
+
+function toggleSelectAllFailures(event) {
+    const failedItems = Array.isArray(state.scanStatus?.failed_items) ? state.scanStatus.failed_items : [];
+    state.selectedFailureIds = event.target.checked ? failedItems.map(item => item.id) : [];
+    renderFailureModalBody();
+}
+
+function getSelectedFailureItems() {
+    const selected = new Set(state.selectedFailureIds);
+    return (state.scanStatus?.failed_items || []).filter(item => selected.has(item.id));
+}
+
+async function copyFailureValue(value, successMessage) {
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value || '');
+        } else {
+            const input = document.createElement('textarea');
+            input.value = value || '';
+            document.body.appendChild(input);
+            input.select();
+            document.execCommand('copy');
+            document.body.removeChild(input);
+        }
+        showToast(successMessage);
+    } catch (error) {
+        showToast(`复制失败: ${error.message}`, 'error');
+    }
+}
+
+async function batchRegenerateFailures() {
+    const selectedItems = getSelectedFailureItems();
+    if (!selectedItems.length) {
+        showToast('请先选择失败项', 'error');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const result = await apiRequest('/api/scan/failures/regenerate', {
+            method: 'POST',
+            body: JSON.stringify({ ids: selectedItems.map(item => item.id) })
+        });
+        showToast(`批量重生成完成: ${result.success || 0} 成功, ${result.failed || 0} 失败`);
+        await updateScanStatus();
+        renderFailureModalBody();
+        await loadDashboardData();
+        await loadNotes();
+    } catch (error) {
+        showToast(`批量重生成失败: ${error.message}`, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+function exportSelectedFailures() {
+    const selectedItems = getSelectedFailureItems();
+    if (!selectedItems.length) {
+        showToast('请先选择失败项', 'error');
+        return;
+    }
+
+    const blob = new Blob([JSON.stringify(selectedItems, null, 2)], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `lumina-failures-${Date.now()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    showToast('失败记录已导出');
+}
+
+async function batchDeleteFailures() {
+    const selectedItems = getSelectedFailureItems();
+    if (!selectedItems.length) {
+        showToast('请先选择失败项', 'error');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const result = await apiRequest('/api/scan/failures/delete', {
+            method: 'POST',
+            body: JSON.stringify({ ids: selectedItems.map(item => item.id) })
+        });
+        showToast(`已删除 ${result.deleted || 0} 条失败记录`);
+        await updateScanStatus();
+        state.selectedFailureIds = [];
+        renderFailureModalBody();
+    } catch (error) {
+        showToast(`删除失败: ${error.message}`, 'error');
+    } finally {
+        showLoading(false);
+    }
+}
+
+async function batchTagFailures() {
+    const selectedItems = getSelectedFailureItems();
+    if (!selectedItems.length) {
+        showToast('请先选择失败项', 'error');
+        return;
+    }
+
+    const input = document.getElementById('failure-tag-input');
+    const tags = (input?.value || '')
+        .split(',')
+        .map(item => item.trim())
+        .filter(Boolean);
+
+    if (!tags.length) {
+        showToast('请输入至少一个标签', 'error');
+        return;
+    }
+
+    showLoading(true);
+    try {
+        const result = await apiRequest('/api/scan/failures/tag', {
+            method: 'POST',
+            body: JSON.stringify({ ids: selectedItems.map(item => item.id), tags })
+        });
+        showToast(`已为 ${result.updated || 0} 条记录打标签`);
+        if (input) input.value = '';
+        await updateScanStatus();
+        renderFailureModalBody();
+    } catch (error) {
+        showToast(`打标签失败: ${error.message}`, 'error');
+    } finally {
+        showLoading(false);
     }
 }
 
@@ -642,6 +1000,7 @@ async function scanDirectory() {
         await apiRequest('/api/scan', { method: 'POST', body: JSON.stringify({ incremental: true }) });
         // 启动请求完成后立即解除全屏遮罩，后续用轮询+提示反馈进度，避免页面长期“转圈”
         showLoading(false);
+        await updateScanStatus();
     } catch (error) {
         showToast('启动扫描失败: ' + (error.message || error), 'error');
         showLoading(false);
@@ -655,6 +1014,7 @@ async function scanDirectory() {
     scanPollTimer = setInterval(async () => {
         try {
             const status = await apiRequest('/api/scan/status');
+            renderScanStatus(status || {});
             if (!status.running) {
                 clearInterval(scanPollTimer);
                 scanPollTimer = null;
@@ -753,6 +1113,21 @@ function formatDateTime(isoString) {
         hour: '2-digit',
         minute: '2-digit'
     });
+}
+
+function formatDuration(seconds) {
+    const total = Math.max(0, Math.round(Number(seconds || 0)));
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+
+    if (hours > 0) {
+        return `${hours}小时 ${minutes}分`;
+    }
+    if (minutes > 0) {
+        return `${minutes}分 ${secs}秒`;
+    }
+    return `${secs}秒`;
 }
 
 // 启动
