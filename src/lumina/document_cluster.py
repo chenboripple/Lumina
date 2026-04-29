@@ -88,17 +88,25 @@ class DocumentClusterer:
         
         # 2. 对短文档按目录聚类
         clusters = self._cluster_by_directory(short_docs)
-        
+
+        # 未被聚类的短文档需要保留独立处理
+        clustered_short = {p for c in clusters for p in c.files}
+        remaining_short_docs = [p for p in short_docs if p not in clustered_short]
+
         # 3. 检查是否有可以追加到已有笔记的文档
+        append_clusters: List[DocumentCluster] = []
+        append_candidates = long_docs + remaining_short_docs
         if existing_notes:
-            clusters, remaining_long_docs = self._match_to_existing(long_docs, existing_notes)
+            append_clusters, remaining_files = self._match_to_existing(append_candidates, existing_notes)
         else:
-            remaining_long_docs = long_docs
-        
-        # 4. 剩余的长文档独立处理
-        self.stats["individual_files"] = len(remaining_long_docs)
-        
-        return clusters, remaining_long_docs
+            remaining_files = append_candidates
+
+        clusters.extend(append_clusters)
+
+        # 4. 剩余文件独立处理
+        self.stats["individual_files"] = len(remaining_files)
+
+        return clusters, remaining_files
     
     def _split_by_size(self, files: List[Path]) -> Tuple[List[Path], List[Path]]:
         """按文件大小分离"""
@@ -166,26 +174,36 @@ class DocumentClusterer:
         clusters = []
         unmatched = []
         
-        # 简化实现：只做文件名匹配
-        # 实际应该用向量相似度
-        existing_titles = {note.get('title', '').lower() for note in existing_notes}
+        # 简化实现：基于标题和文件名匹配（可后续升级为向量相似度）
+        normalized_notes = []
+        for note in existing_notes:
+            title = str(note.get('title', '')).strip()
+            path = str(note.get('path', '')).strip()
+            if title and path:
+                normalized_notes.append({
+                    'title': title,
+                    'title_lower': title.lower(),
+                    'path': path,
+                })
         
         for file in files:
             file_name = file.stem.lower()
             
             # 检查文件名是否与已有标题匹配
             matched = False
-            for title in existing_titles:
+            for note in normalized_notes:
+                title = note['title_lower']
                 if file_name in title or title in file_name:
                     # 创建追加模式的簇
                     cluster = DocumentCluster(
                         cluster_id=f"append_{hashlib.md5(str(file).encode()).hexdigest()[:8]}",
                         files=[file],
                         strategy=ClusterStrategy.APPEND_TO_EXISTING,
-                        title=f"Append to: {title}",
-                        description=f"Append to existing note: {title}",
+                        title=f"Append to: {note['title']}",
+                        description=f"Append to existing note: {note['title']}",
                         metadata={
-                            "append_to": title,
+                            "append_to": note['title'],
+                            "append_to_path": note['path'],
                             "source_file": str(file)
                         }
                     )
@@ -325,6 +343,7 @@ class DocumentClusterer:
                 "cluster_id": cluster.cluster_id,
                 "strategy": cluster.strategy.value,
                 "append_to": cluster.metadata.get("append_to"),
+                "append_to_path": cluster.metadata.get("append_to_path"),
                 "is_append": True
             }
         )

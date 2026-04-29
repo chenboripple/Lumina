@@ -5,11 +5,13 @@ Harness - 智能核心协调器 (Agent 增强版)
 
 import json
 import time
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from difflib import SequenceMatcher
 
 from .planner import Planner, FileInfo
 from .executor import Executor, NoteOutput, ExecutionContext
@@ -370,7 +372,8 @@ class Harness:
             if self.progress_tracker:
                 self.progress_tracker.set_phase("planning")
             
-            plan = self.planner.plan(files)
+            existing_notes = self._collect_existing_notes() if self.config.enable_clustering else None
+            plan = self.planner.plan(files, existing_notes=existing_notes)
             self._log(f"🎯 Processing strategy: {plan.strategy}")
             self._log(f"📦 Total batches: {len(plan.batches)}")
             
@@ -469,7 +472,8 @@ class Harness:
             try:
                 result = self._process_single(file_info, plan)
                 results.append(result)
-                self.state.processed_files += 1
+                if result.get("processed"):
+                    self.state.processed_files += 1
             except Exception as e:
                 self.state.failed_files += 1
                 error_msg = f"Failed to process {file_info.path}: {e}"
@@ -490,7 +494,8 @@ class Harness:
                 try:
                     result = future.result()
                     results.append(result)
-                    self.state.processed_files += 1
+                    if result.get("processed"):
+                        self.state.processed_files += 1
                 except Exception as e:
                     self.state.failed_files += 1
                     error_msg = f"Failed to process {file_info.path}: {e}"
@@ -542,17 +547,50 @@ class Harness:
             if self.config.use_cache and self.cache:
                 cached_result = self.cache.get_processed_result(file_info.hash)
                 if cached_result:
-                    self._log(f"💾 Cache hit! Using cached result")
-                    self.state.cache_hits += 1
-                    cached_data = json.loads(cached_result)
-                    return {
-                        "source": file_path_str,
-                        "cached": True,
-                        "best_score": cached_data["score"],
-                        "final_output": NoteOutput(**cached_data["output"]),
-                        "processing_time": 0,
-                        "success": True
-                    }
+                    try:
+                        # 兼容两种缓存格式：
+                        # 1) 旧格式: {"score":...,"output":...}
+                        # 2) 当前 CacheManager 包装格式: {"result":"{...}","created_at":...}
+                        parsed = json.loads(cached_result)
+                        if isinstance(parsed, dict) and "result" in parsed:
+                            result_payload = parsed.get("result", "")
+                            if isinstance(result_payload, str):
+                                cached_data = json.loads(result_payload)
+                            else:
+                                cached_data = result_payload
+                        else:
+                            cached_data = parsed
+
+                        if not isinstance(cached_data, dict) or "output" not in cached_data:
+                            raise ValueError("invalid processed cache payload")
+
+                        self._log(f"💾 Cache hit! Using cached result")
+                        self.state.cache_hits += 1
+                        return {
+                            "source": file_path_str,
+                            "cached": True,
+                            "best_score": float(cached_data.get("score", 0.0)),
+                            "final_output": NoteOutput(**cached_data["output"]),
+                            "processing_time": 0,
+                            "success": True,
+                            "processed": True,
+                            "final_passed": True,
+                            "iterations": 0,
+                            "best_round": 0,
+                            "best_output": NoteOutput(**cached_data["output"]),
+                            "best_validation": None,
+                            "all_outputs": [],
+                            "iteration_history": [],
+                            "file_info": {
+                                "path": file_path_str,
+                                "size": file_info.size,
+                                "type": file_info.type,
+                                "modified": file_info.modified,
+                                "hash": file_info.hash,
+                            },
+                        }
+                    except Exception as e:
+                        self._log(f"⚠️  Invalid processed cache for {file_path_str}: {e}, recomputing", level="warning")
                 self.state.cache_misses += 1
             
             # Step 2: 迭代处理
@@ -616,6 +654,44 @@ class Harness:
                         if self.error_handler:
                             self.state.errors.append({"file": file_path_str, "error": f"Failed to generate output in round {iteration+1}"})
                         continue
+
+                    # 内容过滤命中：直接作为跳过处理，不进入验证/保存
+                    if current_output.metadata.get("filtered"):
+                        reason = current_output.metadata.get("filter_reason", "filtered")
+                        self._log(f"⏭️  Filtered: {file_path_str} ({reason})")
+                        self.state.skipped_files += 1
+                        processing_duration = time.time() - file_start
+                        if self.progress_tracker:
+                            self.progress_tracker.file_complete({
+                                "file": file_path_str,
+                                "score": 0.0,
+                                "success": True
+                            })
+                        return {
+                            "source": file_path_str,
+                            "file_info": {
+                                "path": file_path_str,
+                                "size": file_info.size,
+                                "type": file_info.type,
+                                "modified": file_info.modified,
+                                "hash": file_info.hash,
+                            },
+                            "processed": False,
+                            "filtered": True,
+                            "filter_reason": reason,
+                            "cached": False,
+                            "final_passed": False,
+                            "iterations": 1,
+                            "best_round": 0,
+                            "best_score": 0.0,
+                            "best_output": None,
+                            "best_validation": None,
+                            "final_output": None,
+                            "all_outputs": [],
+                            "iteration_history": [],
+                            "processing_time": processing_duration,
+                            "success": True
+                        }
                     
                     all_outputs.append(current_output)
                     
@@ -816,18 +892,67 @@ class Harness:
                 continue
             
             output = result["final_output"]
+
+            # 追加模式：写入已有笔记，不创建新文件
+            if output.metadata.get("is_append"):
+                target = output.metadata.get("append_to_path")
+                if not target:
+                    append_title = output.metadata.get("append_to")
+                    if append_title:
+                        fallback = self._find_existing_note_path(output_dir, NoteOutput(
+                            title=str(append_title),
+                            content="",
+                            tags=[],
+                            links=[],
+                            source=output.source,
+                            metadata={},
+                        ))
+                        if fallback:
+                            target = str(fallback)
+                if target:
+                    target_path = Path(target).expanduser()
+                    try:
+                        if target_path.exists():
+                            existing_content, existing_meta = read_file_with_metadata(target_path)
+                            merged_content = existing_content.rstrip() + "\n\n" + output.content.strip() + "\n"
+                            write_file_with_metadata(merged_content, existing_meta, backup=False)
+                        else:
+                            target_path.parent.mkdir(parents=True, exist_ok=True)
+                            new_meta = FileMetadata(
+                                path=target_path,
+                                encoding='utf-8',
+                                line_endings='LF',
+                                size=len(output.content.encode('utf-8')),
+                                modified=0,
+                                is_symlink=False,
+                            )
+                            write_file_with_metadata(output.content, new_meta, backup=False)
+                        saved_count += 1
+                        self._log(f"💾 Appended: {target_path}")
+                        self._index_to_vector_store(result)
+                        continue
+                    except Exception as e:
+                        self._log(f"❌ Failed to append {target_path}: {e}", level="error")
+                        self.state.errors.append({"file": str(target_path), "error": str(e)})
+                        continue
+                else:
+                    self._log("⚠️  Append mode missing append_to_path, fallback to new file", level="warning")
+
+            # 常规笔记去重写入：优先按 source，其次按标题相似度
+            existing_note_path = self._find_existing_note_path(output_dir, output)
             
             # 生成安全文件名
             safe_title = "".join(c if c.isalnum() or c in (' ', '-') else '_' for c in output.title)
             safe_title = safe_title.strip() or "untitled"
             filename = f"{safe_title}.md"
-            filepath = output_dir / filename
+            filepath = existing_note_path if existing_note_path else (output_dir / filename)
             
-            # 避免文件名冲突
-            counter = 1
-            while filepath.exists():
-                filepath = output_dir / f"{safe_title}_{counter}.md"
-                counter += 1
+            # 新文件才做避免冲突；已有文件直接覆盖更新，避免重复堆积
+            if not existing_note_path:
+                counter = 1
+                while filepath.exists():
+                    filepath = output_dir / f"{safe_title}_{counter}.md"
+                    counter += 1
             
             # 格式化输出内容
             content = self._format_output(output, result)
@@ -866,7 +991,10 @@ class Harness:
                 
                 write_file_with_metadata(content, metadata, backup=False)
                 saved_count += 1
-                self._log(f"💾 Saved: {filepath}")
+                if existing_note_path:
+                    self._log(f"♻️  Updated existing note: {filepath}")
+                else:
+                    self._log(f"💾 Saved: {filepath}")
                 
             except Exception as e:
                 self._log(f"❌ Failed to save {filepath}: {e}", level="error")
@@ -877,6 +1005,55 @@ class Harness:
             self._index_to_vector_store(result)
         
         self._log(f"✅ Saved {saved_count} files to {output_dir}")
+
+    def _find_existing_note_path(self, output_dir: Path, output: NoteOutput) -> Optional[Path]:
+        """查找可复用的已有笔记文件（先按 source，再按标题相似度）。"""
+        md_files = list(output_dir.glob("*.md"))
+        if not md_files:
+            return None
+
+        source = (output.source or "").strip()
+        if source:
+            for md in md_files:
+                try:
+                    content, _ = read_file_with_metadata(md)
+                except Exception:
+                    continue
+
+                # Obsidian frontmatter 里通常有 source: ...
+                if self._content_has_source(content, source):
+                    return md
+
+        # 没有 source 命中时，按标题相似度做兜底匹配
+        normalized_target = self._normalize_title(output.title)
+        best_match = None
+        best_score = 0.0
+        for md in md_files:
+            score = SequenceMatcher(None, normalized_target, self._normalize_title(md.stem)).ratio()
+            if score > best_score:
+                best_score = score
+                best_match = md
+
+        if best_match and best_score >= 0.92:
+            return best_match
+        return None
+
+    def _content_has_source(self, content: str, source: str) -> bool:
+        """检查笔记内容/Frontmatter 是否记录了同一个 source。"""
+        # 匹配 YAML 风格：source: /path/to/file
+        pattern = rf"(?m)^source:\s*['\"]?{re.escape(source)}['\"]?\s*$"
+        if re.search(pattern, content):
+            return True
+
+        # 兼容纯 markdown 中的 Source: /path
+        return source in content
+
+    @staticmethod
+    def _normalize_title(title: str) -> str:
+        text = (title or "").lower()
+        text = re.sub(r"[_\-\s]+", " ", text)
+        text = re.sub(r"\d+$", "", text).strip()
+        return text
     
     def _format_output(self, output: NoteOutput, result: Dict) -> str:
         """格式化输出内容（委托给插件渲染）"""
@@ -1033,8 +1210,34 @@ class Harness:
             strategy=strategy_map.get(cluster_strategy, ClusterStrategy.COMBINE_SHORT_DOCS),
             title=cluster_title,
             description=file_info.metadata.get("cluster_description"),
+            metadata=file_info.metadata,
         )
-        
+
+        # summarize_multiple 使用 LLM 真实总结
+        if cluster.strategy == ClusterStrategy.SUMMARIZE_MULTIPLE:
+            source_blocks = []
+            for idx, src in enumerate(cluster_files[:10]):
+                text = file_contents.get(src, "")
+                source_blocks.append(f"## Source {idx + 1}: {Path(src).name}\n{text[:1800]}")
+            prompt = (
+                "You are a knowledge synthesis expert. Summarize the related documents into one high-quality note.\n"
+                "Return JSON with fields: title, summary, key_points, tags, suggested_links, metadata.\n\n"
+                f"Cluster title: {cluster_title}\n"
+                f"Source count: {len(cluster_files)}\n\n"
+                + "\n\n".join(source_blocks)
+            )
+            raw = self.executor._call_llm(prompt, context)
+            note = self.executor._parse_output(raw, file_info, context)
+            note.metadata.update({
+                "is_cluster": True,
+                "cluster_files": cluster_files,
+                "cluster_strategy": cluster_strategy,
+                "cluster_id": cluster.cluster_id,
+            })
+            note.links = list(set(note.links + [Path(src).name for src in cluster_files]))
+            note.content = note.content.rstrip() + "\n\n## Source Files\n" + "\n".join([f"- {src}" for src in cluster_files]) + "\n"
+            return note
+
         clusterer = DocumentClusterer()
         result = clusterer.format_cluster(cluster, file_contents)
         
@@ -1043,7 +1246,7 @@ class Harness:
             title=result.title,
             content=result.content,
             tags=result.tags,
-            links=[],
+            links=[Path(src).name for src in result.sources],
             source=str(file_info.path),
             metadata={
                 **result.metadata,
@@ -1060,6 +1263,27 @@ class Harness:
         )
         
         return note
+
+    def _collect_existing_notes(self) -> List[Dict[str, Any]]:
+        """收集输出目录中已有笔记，用于 append 匹配。"""
+        notes: List[Dict[str, Any]] = []
+        output_dir = Path(self.config.output_dir).expanduser()
+        if not output_dir.exists() or not output_dir.is_dir():
+            return notes
+
+        for md in output_dir.glob("*.md"):
+            title = md.stem.replace("_", " ").strip()
+            try:
+                content, _ = read_file_with_metadata(md)
+                for line in content.splitlines():
+                    if line.startswith("# "):
+                        title = line[2:].strip() or title
+                        break
+            except Exception:
+                pass
+            notes.append({"title": title, "path": str(md)})
+
+        return notes
     
     def _log(self, message: str, level: str = "info"):
         """输出日志"""

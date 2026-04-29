@@ -248,7 +248,7 @@ class Planner:
         # 简化判断：所有图片都尝试 OCR
         return True
     
-    def plan(self, files: List[FileInfo]) -> ProcessingPlan:
+    def plan(self, files: List[FileInfo], existing_notes: Optional[List[Dict[str, Any]]] = None) -> ProcessingPlan:
         """
         制定处理计划
         
@@ -278,7 +278,7 @@ class Planner:
         
         if self.clusterer:
             file_paths = [f.path for f in files]
-            clusters, individual = self.clusterer.cluster(file_paths)
+            clusters, individual = self.clusterer.cluster(file_paths, existing_notes=existing_notes)
             
             # 将聚类结果转换为 FileInfo
             for cluster in clusters:
@@ -288,7 +288,7 @@ class Planner:
                     type="cluster",
                     size=sum(f.stat().st_size for f in cluster.files if f.exists()),
                     modified=max(f.stat().st_mtime for f in cluster.files if f.exists()),
-                    hash="",  # 聚合文件不计算单一哈希
+                    hash=hashlib.md5("|".join(sorted(str(f) for f in cluster.files)).encode("utf-8")).hexdigest(),
                     metadata={
                         "filename": f"cluster_{cluster.cluster_id}",
                         "extension": ".cluster",

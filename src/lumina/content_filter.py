@@ -5,6 +5,7 @@ Content Filter - 内容前置过滤器
 
 import re
 import hashlib
+import json
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
@@ -52,8 +53,11 @@ class ContentFilter:
     ]
 
     def __init__(self):
+        self._fingerprint_file = Path("~/.lumina/fingerprints/content_fingerprints.json").expanduser()
+        self._fingerprint_file.parent.mkdir(parents=True, exist_ok=True)
+
         # 已处理文件的内容指纹缓存(用于重复检测)
-        self._content_fingerprints: Dict[str, str] = {}
+        self._content_fingerprints: Dict[str, str] = self._load_fingerprints()
         self.stats = {
             "total_checked": 0,
             "passed": 0,
@@ -190,11 +194,13 @@ class ContentFilter:
 
     def _check_duplicate(self, file_path: Path, content: str) -> FilterResult:
         """检查是否与已有文件重复"""
-        # 生成内容指纹(基于前1000个字符的哈希)
-        fingerprint = hashlib.md5(content[:1000].encode()).hexdigest()
+        # 生成内容指纹（基于完整内容）
+        fingerprint = hashlib.md5(content.encode('utf-8', errors='ignore')).hexdigest()
 
         # 检查完全相同的指纹
         for existing_path, existing_fp in self._content_fingerprints.items():
+            if existing_path == str(file_path):
+                continue
             if existing_fp == fingerprint:
                 return FilterResult(
                     should_process=False,
@@ -214,20 +220,37 @@ class ContentFilter:
 
         # 记录指纹
         self._content_fingerprints[str(file_path)] = fingerprint
+        self._save_fingerprints()
 
         return FilterResult(should_process=True, reason="非重复文件", confidence=0.9, metadata={})
 
     def _check_similarity(self, file_path: Path, content: str) -> FilterResult:
         """检查内容相似度"""
-        # 提取词频特征
-        current_words = self._extract_word_freq(content[:2000])
-
-        for existing_path, existing_fp in self._content_fingerprints.items():
-            # 这里简化处理,实际应该读取已有文件内容
-            # 为了性能,我们只检查完全相同的指纹
-            pass
-
+        # 预留扩展点：后续可接入向量或词频相似度
         return FilterResult(should_process=True, reason="", confidence=1.0, metadata={})
+
+    def _load_fingerprints(self) -> Dict[str, str]:
+        """加载持久化的内容指纹。"""
+        if not self._fingerprint_file.exists():
+            return {}
+        try:
+            data = json.loads(self._fingerprint_file.read_text(encoding='utf-8'))
+            if isinstance(data, dict):
+                return {str(k): str(v) for k, v in data.items()}
+        except Exception:
+            pass
+        return {}
+
+    def _save_fingerprints(self):
+        """保存内容指纹到磁盘。"""
+        try:
+            self._fingerprint_file.write_text(
+                json.dumps(self._content_fingerprints, ensure_ascii=False, indent=2),
+                encoding='utf-8'
+            )
+        except Exception:
+            # 保存失败不影响主流程
+            pass
 
     def _assess_value(self, content: str) -> FilterResult:
         """评估内容是否有笔记价值"""
@@ -328,3 +351,4 @@ class ContentFilter:
             "filtered_low_value": 0,
         }
         self._content_fingerprints.clear()
+        self._save_fingerprints()
