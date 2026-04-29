@@ -59,6 +59,10 @@ class HarnessConfig:
     progress_callback: Optional[Any] = None  # 进度回调函数
     error_handler: Optional[Any] = None  # 错误处理器实例
     supported_extensions: List[str] = field(default_factory=list)  # 允许处理的文件扩展名
+    output_structure: Dict[str, bool] = field(default_factory=dict)  # 输出目录结构策略
+    categories: Dict[str, str] = field(default_factory=dict)  # PARA 分类目录映射
+    scenes: List[Dict[str, Any]] = field(default_factory=list)  # 生活场景列表
+    default_scene: str = ""  # 匹配失败时的默认场景
     
     # 新增功能配置（默认启用）
     enable_clustering: bool = True  # 是否启用文档聚合
@@ -158,7 +162,11 @@ class Harness:
             cache_manager=self.cache, 
             history_manager=self.history,
             llm_config=self.config.get_llm_config_for('planner'),
-            enable_clustering=self.config.enable_clustering
+            enable_clustering=self.config.enable_clustering,
+            output_structure=self.config.output_structure,
+            categories=self.config.categories,
+            scenes=self.config.scenes,
+            default_scene=self.config.default_scene,
         )
         self.executor = Executor(
             llm_config=self.config.get_llm_config_for('executor'),
@@ -587,6 +595,7 @@ class Harness:
                                 "type": file_info.type,
                                 "modified": file_info.modified,
                                 "hash": file_info.hash,
+                                "metadata": dict(file_info.metadata),
                             },
                         }
                     except Exception as e:
@@ -832,6 +841,7 @@ class Harness:
                     "type": file_info.type,
                     "modified": file_info.modified,
                     "hash": file_info.hash,
+                    "metadata": dict(file_info.metadata),
                 },
                 "processed": best_output is not None,
                 "cached": False,
@@ -865,6 +875,7 @@ class Harness:
                     "type": file_info.type,
                     "modified": file_info.modified,
                     "hash": file_info.hash,
+                    "metadata": dict(file_info.metadata),
                 },
                 "processed": False,
                 "cached": False,
@@ -938,20 +949,33 @@ class Harness:
                 else:
                     self._log("⚠️  Append mode missing append_to_path, fallback to new file", level="warning")
 
+            file_meta = result.get("file_info", {}).get("metadata", {}) if isinstance(result.get("file_info"), dict) else {}
+
+            # 根据 planner 规划的结构落盘
+            note_subdir = str(file_meta.get("note_subdir", "")).strip("/")
+            target_output_dir = (output_dir / note_subdir) if note_subdir else output_dir
+            target_output_dir.mkdir(parents=True, exist_ok=True)
+
             # 常规笔记去重写入：优先按 source，其次按标题相似度
             existing_note_path = self._find_existing_note_path(output_dir, output)
-            
+
             # 生成安全文件名
             safe_title = "".join(c if c.isalnum() or c in (' ', '-') else '_' for c in output.title)
             safe_title = safe_title.strip() or "untitled"
             filename = f"{safe_title}.md"
-            filepath = existing_note_path if existing_note_path else (output_dir / filename)
-            
+            filepath = existing_note_path if existing_note_path else (target_output_dir / filename)
+            migrate_from_path = None
+
+            # 如果命中的是旧的平铺文件，而 planner 已规划子目录，则迁移到新结构
+            if existing_note_path and note_subdir and existing_note_path.parent == output_dir:
+                filepath = target_output_dir / existing_note_path.name
+                migrate_from_path = existing_note_path
+
             # 新文件才做避免冲突；已有文件直接覆盖更新，避免重复堆积
             if not existing_note_path:
                 counter = 1
                 while filepath.exists():
-                    filepath = output_dir / f"{safe_title}_{counter}.md"
+                    filepath = target_output_dir / f"{safe_title}_{counter}.md"
                     counter += 1
             
             # 格式化输出内容
@@ -990,6 +1014,15 @@ class Harness:
                 )
                 
                 write_file_with_metadata(content, metadata, backup=False)
+
+                # 迁移旧平铺文件到新结构后，清理原文件
+                if migrate_from_path and migrate_from_path != filepath and migrate_from_path.exists():
+                    try:
+                        migrate_from_path.unlink()
+                        self._log(f"📦 Migrated note to structured path: {filepath}")
+                    except Exception as e:
+                        self._log(f"⚠️  Failed to remove old flat note {migrate_from_path}: {e}", level="warning")
+
                 saved_count += 1
                 if existing_note_path:
                     self._log(f"♻️  Updated existing note: {filepath}")
@@ -1008,7 +1041,7 @@ class Harness:
 
     def _find_existing_note_path(self, output_dir: Path, output: NoteOutput) -> Optional[Path]:
         """查找可复用的已有笔记文件（先按 source，再按标题相似度）。"""
-        md_files = list(output_dir.glob("*.md"))
+        md_files = list(output_dir.rglob("*.md"))
         if not md_files:
             return None
 
@@ -1271,7 +1304,7 @@ class Harness:
         if not output_dir.exists() or not output_dir.is_dir():
             return notes
 
-        for md in output_dir.glob("*.md"):
+        for md in output_dir.rglob("*.md"):
             title = md.stem.replace("_", " ").strip()
             try:
                 content, _ = read_file_with_metadata(md)

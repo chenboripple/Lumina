@@ -5,6 +5,7 @@ Planner - 智能规划模块 (Agent 能力增强版)
 """
 
 import os
+import re
 import json
 import hashlib
 import fnmatch
@@ -87,10 +88,39 @@ class Planner:
         'large': 1,   # 大文件（>1MB）
     }
     
-    def __init__(self, cache_manager: CacheManager = None, history_manager=None, llm_config: Dict[str, Any] = None, enable_clustering: bool = True):
+    # PARA 方法论分类目录（默认映射，可在 lumina.yaml output.categories 中覆盖）
+    # Projects: 有明确截止目标的临时项目
+    # Areas:    需长期维护的责任/兴趣领域
+    # Resources:仅供参考的资料，不承担责任
+    # Archive:  已完成或不再使用的材料
+    PARA_CATEGORY_MAP: Dict[str, str] = {
+        "projects":  "Projects",
+        "areas":     "Areas",
+        "resources": "Resources",
+        "archive":   "Archive",
+    }
+
+    def __init__(
+        self,
+        cache_manager: CacheManager = None,
+        history_manager=None,
+        llm_config: Dict[str, Any] = None,
+        enable_clustering: bool = True,
+        output_structure: Optional[Dict[str, bool]] = None,
+        categories: Optional[Dict[str, str]] = None,
+        scenes: Optional[List[Dict[str, Any]]] = None,
+        default_scene: str = "",
+    ):
         self.cache = cache_manager
         self.history = history_manager
         self.llm_config = llm_config or {}
+        self.output_structure = output_structure or {"by_date": False, "by_type": False, "flat": False}
+        # PARA 分类映射（用户可覆盖）
+        self.categories: Dict[str, str] = {**self.PARA_CATEGORY_MAP, **(categories or {})}
+        # 生活场景列表：[{name: "工作", keywords: [...]}, ...]
+        # 空列表时直接使用单层 PARA
+        self.scenes: List[Dict[str, Any]] = scenes or []
+        self.default_scene: str = default_scene
         
         # 初始化文档聚合器
         self.clusterer = DocumentClusterer() if enable_clustering else None
@@ -329,6 +359,9 @@ class Planner:
             f.processing_priority,
             -f.estimated_cost,  # 成本高的优先（大文件优先）
         ))
+
+        # 为每个文件规划笔记目录结构
+        self._assign_note_structure(sorted_files)
         
         # 分批处理
         batches = self._create_batches(sorted_files)
@@ -414,6 +447,107 @@ class Planner:
             f"Estimated cost: {total_cost:.0f} tokens, "
             f"Estimated time: {total_time:.1f}s"
         )
+
+    def _assign_note_structure(self, files: List[FileInfo]):
+        """为每个文件规划 note_subdir。
+
+        配置了 scenes 时路径为：  {场景}/{PARA}
+        未配置 scenes 时路径为：  {PARA}
+        flat=true 时不分目录。
+        """
+        if not files:
+            return
+
+        if self.output_structure.get("flat"):
+            for f in files:
+                f.metadata["note_subdir"] = ""
+            return
+
+        for f in files:
+            para = self._infer_para(f)
+            if self.scenes:
+                scene_ctx = self._infer_scene_context(f)
+                f.metadata["note_subdir"] = f"{scene_ctx}/{para}"
+            else:
+                f.metadata["note_subdir"] = para
+
+    def _infer_scene_context(self, file_info: FileInfo) -> str:
+        """按用户配置的关键词列表匹配生活场景（第一层目录）。"""
+        text = f"{file_info.path.name} {file_info.path.stem}".lower()
+        for scene_def in self.scenes:
+            name = scene_def.get("name", "")
+            keywords = scene_def.get("keywords", [])
+            if any(re.search(str(kw).lower(), text) for kw in keywords if kw):
+                return name
+        # 匹配失败：用默认场景，没有则用第一个
+        if self.default_scene:
+            return self.default_scene
+        return self.scenes[0]["name"] if self.scenes else ""
+
+    def _infer_para(self, file_info: FileInfo) -> str:
+        """按 PARA 方法论推断分类目录名。
+
+        优先级：
+          1. metadata["para"] 显式标注
+          2. 文件名关键词 → Archive / Projects / Areas
+          3. scene → PARA 映射
+          4. 文件类型兜底 → Resources
+        """
+        # 1. 显式标注
+        para = file_info.metadata.get("para", "")
+        if para and para in self.categories:
+            return self.categories[para]
+
+        # 2. 集群文件 → Resources
+        if file_info.type == "cluster":
+            return self.categories.get("resources", "Resources")
+
+        text = f"{file_info.path.name} {file_info.path.stem}".lower()
+
+        # 3. Archive：已完成/归档/历史材料
+        if re.search(
+            r"总结|归档|archive|旧版|已完成|复盘|年度|历史|obsolete|deprecated|_old|old_|backup",
+            text
+        ):
+            return self.categories.get("archive", "Archive")
+
+        # 4. Projects：有明确截止目标的临时任务
+        if re.search(
+            r"需求|requirement|spec\b|项目|project|sprint|roadmap|milestone"
+            r"|计划书|方案|proposal|prd\b|mrd\b|开发计划|排期|deadline",
+            text
+        ):
+            return self.categories.get("projects", "Projects")
+
+        # 5. Areas：长期维护的责任/兴趣领域
+        if re.search(
+            r"规范|标准|流程|制度|指南|架构|design|architecture|维护|运营"
+            r"|管理体系|sop\b|policy|日记|diary|journal|周报|月报",
+            text
+        ):
+            return self.categories.get("areas", "Areas")
+
+        # 6. scene → PARA 映射
+        scene = file_info.metadata.get("scene", "")
+        scene_to_para = {
+            "meeting_notes":    "projects",
+            "requirements":     "projects",
+            "task_list":        "projects",
+            "technical_doc":    "areas",
+            "code_explanation": "areas",
+            "diary":            "areas",
+            "book_notes":       "resources",
+            "knowledge_essay":  "resources",
+            "generic_notes":    "resources",
+        }
+        para_key = scene_to_para.get(scene, "resources")
+        return self.categories.get(para_key, "Resources")
+
+    def _sanitize_component(self, name: str) -> str:
+        value = (name or "").strip().replace("\\", "/")
+        value = re.sub(r"[^\w\u4e00-\u9fff\- ]+", "_", value)
+        value = re.sub(r"\s+", "_", value)
+        return value.strip("._/")
     
     def get_stats(self) -> Dict[str, Any]:
         """获取扫描统计"""

@@ -19,6 +19,7 @@ class DocumentScene(Enum):
     CODE_EXPLANATION = "code_explanation"  # 代码说明
     DIARY = "diary"  # 日记
     TASK_LIST = "task_list"  # 任务列表
+    KNOWLEDGE_ESSAY = "knowledge_essay"  # 知识随笔
     GENERIC_NOTES = "generic_notes"  # 通用笔记
     UNKNOWN = "unknown"  # 未知场景
 
@@ -89,6 +90,11 @@ class SceneDetector:
             "任务", "task", "todo", "待办", "to-do", "清单", "checklist", "完成", "done",
             "进行中", "in-progress", "deadline", "截止日期", "优先级"
         ],
+        DocumentScene.KNOWLEDGE_ESSAY: [
+            "随笔", "杂谈", "浅谈", "初探", "漫谈", "感悟", "心得", "体会", "想法", "碎片",
+            "观点", "看法", "思考", "essay", "thoughts", "reflection", "insight", "musing",
+            "知识", "学习笔记", "总结",
+        ],
     }
     
     # 文件名模式
@@ -119,6 +125,14 @@ class SceneDetector:
             r'(?i).*todo.*',
             r'(?i).*task.*',
             r'(?i).*任务.*',
+        ],
+        DocumentScene.KNOWLEDGE_ESSAY: [
+            r'(?i).*随笔.*',
+            r'(?i).*杂谈.*',
+            r'(?i).*感悟.*',
+            r'(?i).*心得.*',
+            r'(?i).*浅谈.*',
+            r'(?i).*漫谈.*',
         ],
     }
     
@@ -281,6 +295,14 @@ class SceneDetector:
                 output_fields=["title", "date", "mood", "events", "reflections", "tags"],
                 formatter=self._format_diary
             ),
+            DocumentScene.KNOWLEDGE_ESSAY: SceneTemplate(
+                scene=DocumentScene.KNOWLEDGE_ESSAY,
+                name="知识随笔提取",
+                description="提取核心观点、关键洞见、延伸思考、关联概念",
+                prompt_template=self._knowledge_essay_prompt_template(),
+                output_fields=["title", "core_idea", "key_insights", "extended_thinking", "related_concepts", "notable_quotes", "tags"],
+                formatter=self._format_knowledge_essay
+            ),
             DocumentScene.GENERIC_NOTES: SceneTemplate(
                 scene=DocumentScene.GENERIC_NOTES,
                 name="通用笔记提取",
@@ -294,39 +316,40 @@ class SceneDetector:
     # === 各场景的提示词模板 ===
     
     def _meeting_prompt_template(self) -> str:
-        return """You are a meeting notes expert. Analyze this meeting content and generate structured meeting notes.
+        return """你是一位会议纪要整理专家。请分析以下会议内容，生成结构化的会议纪要。
 
-## Source Information
-- File: {filename}
+## 来源信息
+- 文件：{filename}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract meeting title, date, and attendees
-2. List agenda items covered
-3. Summarize key decisions made
-4. Identify action items with responsible persons and deadlines
-5. Add relevant tags
+## 提取要求
+1. 提取会议标题、日期、参会人员
+2. 整理议题/议程
+3. 归纳决议事项
+4. 提取行动项（负责人、截止日期）
+5. 添加相关标签
+6. **语言要求**：使用与源内容相同的语言填充所有字段值，若源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Meeting Title - YYYY-MM-DD",
+    "title": "会议标题 - 日期",
     "meeting_date": "YYYY-MM-DD",
-    "attendees": ["Person A", "Person B"],
-    "agenda": ["Agenda Item 1", "Agenda Item 2"],
-    "decisions": ["Decision 1", "Decision 2"],
+    "attendees": ["张三", "李四"],
+    "agenda": ["议题1", "议题2"],
+    "decisions": ["决议1", "决议2"],
     "action_items": [
         {{
-            "task": "Task description",
-            "owner": "Person responsible",
+            "task": "任务描述",
+            "owner": "负责人",
             "deadline": "YYYY-MM-DD"
         }}
     ],
-    "tags": ["tag1", "tag2"],
+    "tags": ["标签1", "标签2"],
     "metadata": {{
         "confidence": 0.95
     }}
@@ -334,38 +357,39 @@ Return JSON with this structure:
 """
     
     def _technical_doc_prompt_template(self) -> str:
-        return """You are a technical documentation expert. Analyze this technical content and generate structured documentation.
+        return """你是一位技术文档整理专家。请分析以下技术内容，生成结构化的技术文档笔记。
 
-## Source Information
-- File: {filename}
+## 来源信息
+- 文件：{filename}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract overview/summary of the system
-2. Document architecture/design if mentioned
-3. Extract API specifications (endpoints, parameters, responses)
-4. Document implementation details
-5. Add relevant tags
+## 提取要求
+1. 提取系统/组件概述
+2. 整理架构设计要点
+3. 提取接口规范（如有）
+4. 记录实现细节
+5. 添加相关标签
+6. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Component/System Name",
-    "overview": "Brief overview of the system",
-    "architecture": ["Architecture point 1", "Architecture point 2"],
+    "title": "组件/系统名称",
+    "overview": "系统概述",
+    "architecture": ["架构要点1", "架构要点2"],
     "api_spec": [
         {{
             "endpoint": "/api/v1/resource",
             "method": "GET",
-            "description": "What this API does"
+            "description": "接口描述"
         }}
     ],
-    "implementation": ["Implementation detail 1"],
-    "tags": ["tag1", "tag2"],
+    "implementation": ["实现细节1", "实现细节2"],
+    "tags": ["标签1", "标签2"],
     "metadata": {{
         "confidence": 0.95
     }}
@@ -373,37 +397,38 @@ Return JSON with this structure:
 """
     
     def _requirements_prompt_template(self) -> str:
-        return """You are a requirements engineering expert. Analyze this requirements content and generate structured requirements.
+        return """你是一位需求分析专家。请分析以下需求内容，生成结构化的需求文档笔记。
 
-## Source Information
-- File: {filename}
+## 来源信息
+- 文件：{filename}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract requirements title and overview
-2. List feature requirements
-3. Define acceptance criteria
-4. Set priorities (High/Medium/Low)
-5. Add relevant tags
+## 提取要求
+1. 提取需求标题和背景概述
+2. 整理功能需求列表
+3. 归纳验收标准
+4. 标注优先级（高/中/低）
+5. 添加相关标签
+6. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Requirements Title",
-    "overview": "Brief overview",
+    "title": "需求标题",
+    "overview": "需求背景与概述",
     "features": [
         {{
-            "name": "Feature Name",
-            "description": "What this feature does",
-            "priority": "High|Medium|Low"
+            "name": "功能名称",
+            "description": "功能描述",
+            "priority": "高|中|低"
         }}
     ],
-    "acceptance_criteria": ["Criterion 1", "Criterion 2"],
-    "tags": ["tag1", "tag2"],
+    "acceptance_criteria": ["验收标准1", "验收标准2"],
+    "tags": ["标签1", "标签2"],
     "metadata": {{
         "confidence": 0.95
     }}
@@ -411,40 +436,41 @@ Return JSON with this structure:
 """
     
     def _book_notes_prompt_template(self) -> str:
-        return """You are a book notes expert. Analyze this reading notes content and generate structured book notes.
+        return """你是一位读书笔记整理专家。请分析以下读书笔记内容，生成结构化的书摘笔记。
 
-## Source Information
-- File: {filename}
+## 来源信息
+- 文件：{filename}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract book title, author
-2. List key insights
-3. Capture important quotes
-4. Record personal reflections
-5. Add relevant tags
+## 提取要求
+1. 提取书名、作者
+2. 整理核心观点/论点
+3. 摘录精彩句子/段落
+4. 记录个人感悟与思考
+5. 添加相关标签
+6. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Book Notes: Book Title",
+    "title": "读书笔记：书名",
     "book_info": {{
-        "title": "Book Title",
-        "author": "Author Name"
+        "title": "书名",
+        "author": "作者"
     }},
-    "key_insights": ["Insight 1", "Insight 2"],
+    "key_insights": ["核心观点1", "核心观点2"],
     "quotes": [
         {{
-            "text": "Quote text",
-            "page": "Page number (if available)"
+            "text": "摘录原文",
+            "page": "页码（如有）"
         }}
     ],
-    "reflections": ["Reflection 1"],
-    "tags": ["tag1", "tag2"],
+    "reflections": ["感悟1", "感悟2"],
+    "tags": ["标签1", "标签2"],
     "metadata": {{
         "confidence": 0.95
     }}
@@ -452,44 +478,45 @@ Return JSON with this structure:
 """
     
     def _code_explanation_prompt_template(self) -> str:
-        return """You are a code documentation expert. Analyze this code content and generate structured code explanation.
+        return """你是一位代码文档整理专家。请分析以下代码内容，生成结构化的代码说明笔记。
 
-## Source Information
-- File: {filename}
+## 来源信息
+- 文件：{filename}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract code overview/purpose
-2. Document functions/methods with signatures and descriptions
-3. Document classes with attributes and methods
-4. Provide usage examples if present
-5. Add relevant tags
+## 提取要求
+1. 概述代码/模块的功能与用途
+2. 记录函数/方法（签名、功能描述）
+3. 记录类（属性、方法列表）
+4. 整理使用示例
+5. 添加相关标签
+6. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Component/File Name",
-    "overview": "What this code does",
+    "title": "组件/文件名",
+    "overview": "代码用途概述",
     "functions": [
         {{
-            "name": "function_name",
+            "name": "函数名",
             "signature": "def func_name(params)",
-            "description": "What this function does"
+            "description": "功能描述"
         }}
     ],
     "classes": [
         {{
-            "name": "ClassName",
-            "description": "What this class does",
-            "methods": ["method1", "method2"]
+            "name": "类名",
+            "description": "类的功能",
+            "methods": ["方法1", "方法2"]
         }}
     ],
-    "usage_examples": ["Code example 1"],
-    "tags": ["tag1", "tag2"],
+    "usage_examples": ["示例代码1"],
+    "tags": ["标签1", "标签2"],
     "metadata": {{
         "confidence": 0.95
     }}
@@ -497,35 +524,35 @@ Return JSON with this structure:
 """
     
     def _task_list_prompt_template(self) -> str:
-        return """You are a task management expert. Analyze this task list and generate structured tasks.
+        return """你是一位任务管理专家。请分析以下任务清单内容，生成结构化的任务笔记。
 
-## Source Information
-- File: {filename}
+## 来源信息
+- 文件：{filename}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract task list title
-2. List all tasks with descriptions
-3. Capture priorities, deadlines, status
-4. Add relevant tags
+## 提取要求
+1. 提取任务清单标题
+2. 整理所有任务（描述、优先级、截止日期、状态）
+3. 添加相关标签
+4. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Task List Title",
+    "title": "任务清单标题",
     "tasks": [
         {{
-            "task": "Task description",
-            "priority": "High|Medium|Low",
-            "deadline": "YYYY-MM-DD (if available)",
-            "status": "Todo|In Progress|Done|Blocked"
+            "task": "任务描述",
+            "priority": "高|中|低",
+            "deadline": "YYYY-MM-DD（如有）",
+            "status": "待办|进行中|已完成|阻塞"
         }}
     ],
-    "tags": ["tag1", "tag2"],
+    "tags": ["标签1", "标签2"],
     "metadata": {{
         "confidence": 0.95
     }}
@@ -533,31 +560,32 @@ Return JSON with this structure:
 """
     
     def _diary_prompt_template(self) -> str:
-        return """You are a journaling expert. Analyze this diary content and generate structured diary entry.
+        return """你是一位日记整理专家。请分析以下日记内容，生成结构化的日记笔记。
 
-## Source Information
-- File: {filename}
+## 来源信息
+- 文件：{filename}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract date, mood
-2. Record key events
-3. Capture reflections/feelings
-4. Add relevant tags
+## 提取要求
+1. 提取日期、心情状态
+2. 记录关键事件
+3. 整理感悟与反思
+4. 添加相关标签
+5. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Diary - YYYY-MM-DD",
+    "title": "日记 - YYYY-MM-DD",
     "date": "YYYY-MM-DD",
-    "mood": "Mood description",
-    "events": ["Event 1", "Event 2"],
-    "reflections": ["Reflection 1"],
-    "tags": ["tag1", "tag2"],
+    "mood": "心情描述",
+    "events": ["事件1", "事件2"],
+    "reflections": ["感悟1", "感悟2"],
+    "tags": ["标签1", "标签2"],
     "metadata": {{
         "confidence": 0.95
     }}
@@ -565,32 +593,33 @@ Return JSON with this structure:
 """
     
     def _generic_prompt_template(self) -> str:
-        return """You are a knowledge extraction expert. Analyze the following content and generate a structured note.
+        return """你是一位知识提取专家。请分析以下内容，生成结构化的知识笔记。
 
-## Source Information
-- File: {filename}
-- Type: {file_type}
+## 来源信息
+- 文件：{filename}
+- 类型：{file_type}
 
-## Content
+## 内容
 ```
 {content}
 ```
 
-## Instructions
-1. Extract key concepts and insights
-2. Create a clear, structured summary
-3. Identify potential links to other topics
-4. Suggest relevant tags
-5. Assess content complexity and confidence
+## 提取要求
+1. 提炼核心概念与洞见
+2. 生成清晰的结构化摘要
+3. 识别可能关联的主题
+4. 推荐相关标签
+5. 评估内容复杂度与可信度
+6. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
-## Output Format
-Return JSON with this structure:
+## 输出格式
+返回如下 JSON 结构：
 {{
-    "title": "Concise, descriptive title",
-    "summary": "Brief overview of the content",
-    "key_points": ["point 1", "point 2", "point 3"],
-    "tags": ["tag1", "tag2", "tag3"],
-    "suggested_links": ["Topic A", "Topic B"],
+    "title": "简洁描述性标题",
+    "summary": "内容概述",
+    "key_points": ["要点1", "要点2", "要点3"],
+    "tags": ["标签1", "标签2"],
+    "suggested_links": ["关联主题A", "关联主题B"],
     "metadata": {{
         "complexity": "simple|moderate|complex",
         "confidence": 0.95,
@@ -599,67 +628,103 @@ Return JSON with this structure:
 }}
 """
     
+    def _knowledge_essay_prompt_template(self) -> str:
+        return """你是一位知识整理专家。请分析以下随笔/感悟/思考类内容，生成结构化的知识随笔笔记。
+
+## 来源信息
+- 文件：{filename}
+
+## 内容
+```
+{content}
+```
+
+## 提取要求
+1. 提炼核心论点/中心思想
+2. 整理关键洞见（具体观点、发现）
+3. 归纳延伸思考（从内容引申出的思考）
+4. 识别关联概念（相关知识领域、术语）
+5. 摘录金句（精彩表达）
+6. 添加相关标签
+7. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
+
+## 输出格式
+返回如下 JSON 结构：
+{{
+    "title": "随笔标题",
+    "core_idea": "核心论点/中心思想（一两句话概括）",
+    "key_insights": ["洞见1", "洞见2", "洞见3"],
+    "extended_thinking": ["延伸思考1", "延伸思考2"],
+    "related_concepts": ["关联概念1", "关联概念2"],
+    "notable_quotes": ["金句1", "金句2"],
+    "tags": ["标签1", "标签2"],
+    "metadata": {{
+        "confidence": 0.95
+    }}
+}}
+"""
+
     # === Markdown 格式化函数 ===
     
     def _format_meeting_notes(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Meeting Notes')}\n"]
+        lines = [f"# {data.get('title', '会议纪要')}\n"]
         
         if data.get('meeting_date'):
-            lines.append(f"**Date:** {data['meeting_date']}\n\n")
+            lines.append(f"**日期：** {data['meeting_date']}\n\n")
         
         if data.get('attendees'):
-            lines.append("## Attendees\n")
+            lines.append("## 参会人员\n")
             for attendee in data['attendees']:
                 lines.append(f"- {attendee}\n")
             lines.append("\n")
         
         if data.get('agenda'):
-            lines.append("## Agenda\n")
+            lines.append("## 议题\n")
             for item in data['agenda']:
                 lines.append(f"- {item}\n")
             lines.append("\n")
         
         if data.get('decisions'):
-            lines.append("## Decisions\n")
+            lines.append("## 决议事项\n")
             for decision in data['decisions']:
                 lines.append(f"- {decision}\n")
             lines.append("\n")
         
         if data.get('action_items'):
-            lines.append("## Action Items\n")
+            lines.append("## 行动项\n")
             for item in data['action_items']:
                 task = item.get('task', '')
                 owner = item.get('owner', '')
                 deadline = item.get('deadline', '')
                 line = f"- [ ] {task}"
                 if owner:
-                    line += f" (Owner: {owner})"
+                    line += f"（负责人：{owner}）"
                 if deadline:
                     line += f" @{deadline}"
                 lines.append(line + "\n")
             lines.append("\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         
         return "".join(lines)
     
     def _format_technical_doc(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Technical Documentation')}\n"]
+        lines = [f"# {data.get('title', '技术文档')}\n"]
         
         if data.get('overview'):
-            lines.extend(["## Overview\n", data['overview'] + "\n\n"])
+            lines.extend(["## 概述\n", data['overview'] + "\n\n"])
         
         if data.get('architecture'):
-            lines.append("## Architecture\n")
+            lines.append("## 架构设计\n")
             for point in data['architecture']:
                 lines.append(f"- {point}\n")
             lines.append("\n")
         
         if data.get('api_spec'):
-            lines.append("## API Specification\n")
+            lines.append("## 接口说明\n")
             for api in data['api_spec']:
                 method = api.get('method', 'GET')
                 endpoint = api.get('endpoint', '')
@@ -668,95 +733,95 @@ Return JSON with this structure:
                 lines.append(f"{desc}\n\n")
         
         if data.get('implementation'):
-            lines.append("## Implementation\n")
+            lines.append("## 实现要点\n")
             for detail in data['implementation']:
                 lines.append(f"- {detail}\n")
             lines.append("\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         
         return "".join(lines)
     
     def _format_requirements(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Requirements')}\n"]
+        lines = [f"# {data.get('title', '需求文档')}\n"]
         
         if data.get('overview'):
-            lines.extend(["## Overview\n", data['overview'] + "\n\n"])
+            lines.extend(["## 概述\n", data['overview'] + "\n\n"])
         
         if data.get('features'):
-            lines.append("## Features\n")
+            lines.append("## 功能需求\n")
             for feature in data['features']:
                 name = feature.get('name', '')
                 desc = feature.get('description', '')
-                priority = feature.get('priority', 'Medium')
-                lines.append(f"### {name} (Priority: {priority})\n")
+                priority = feature.get('priority', '中')
+                lines.append(f"### {name}（优先级：{priority}）\n")
                 lines.append(f"{desc}\n\n")
         
         if data.get('acceptance_criteria'):
-            lines.append("## Acceptance Criteria\n")
+            lines.append("## 验收标准\n")
             for criterion in data['acceptance_criteria']:
                 lines.append(f"- [ ] {criterion}\n")
             lines.append("\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         
         return "".join(lines)
     
     def _format_book_notes(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Book Notes')}\n"]
+        lines = [f"# {data.get('title', '读书笔记')}\n"]
         
         book_info = data.get('book_info', {})
         if book_info:
-            lines.append("## Book Information\n")
+            lines.append("## 书籍信息\n")
             if book_info.get('title'):
-                lines.append(f"- **Title:** {book_info['title']}\n")
+                lines.append(f"- **书名：** {book_info['title']}\n")
             if book_info.get('author'):
-                lines.append(f"- **Author:** {book_info['author']}\n")
+                lines.append(f"- **作者：** {book_info['author']}\n")
             lines.append("\n")
         
         if data.get('key_insights'):
-            lines.append("## Key Insights\n")
+            lines.append("## 核心观点\n")
             for insight in data['key_insights']:
                 lines.append(f"- {insight}\n")
             lines.append("\n")
         
         if data.get('quotes'):
-            lines.append("## Quotes\n")
+            lines.append("## 精彩摘录\n")
             for quote in data['quotes']:
                 text = quote.get('text', '')
                 page = quote.get('page', '')
                 lines.append(f"> {text}\n")
                 if page:
-                    lines.append(f"> (Page {page})\n")
+                    lines.append(f"> （第 {page} 页）\n")
                 lines.append("\n")
         
         if data.get('reflections'):
-            lines.append("## Reflections\n")
+            lines.append("## 感悟与思考\n")
             for reflection in data['reflections']:
                 lines.append(f"- {reflection}\n")
             lines.append("\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         
         return "".join(lines)
     
     def _format_code_explanation(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Code Documentation')}\n"]
+        lines = [f"# {data.get('title', '代码说明')}\n"]
         
         if data.get('overview'):
-            lines.extend(["## Overview\n", data['overview'] + "\n\n"])
+            lines.extend(["## 概述\n", data['overview'] + "\n\n"])
         
         if data.get('functions'):
-            lines.append("## Functions\n")
+            lines.append("## 函数/方法\n")
             for func in data['functions']:
                 name = func.get('name', '')
                 signature = func.get('signature', '')
@@ -765,7 +830,7 @@ Return JSON with this structure:
                 lines.append(f"{desc}\n\n")
         
         if data.get('classes'):
-            lines.append("## Classes\n")
+            lines.append("## 类\n")
             for cls in data['classes']:
                 name = cls.get('name', '')
                 desc = cls.get('description', '')
@@ -773,94 +838,130 @@ Return JSON with this structure:
                 lines.append(f"### {name}\n")
                 lines.append(f"{desc}\n")
                 if methods:
-                    lines.append("**Methods:** " + ", ".join(methods) + "\n")
+                    lines.append("**方法：** " + "、".join(methods) + "\n")
                 lines.append("\n")
         
         if data.get('usage_examples'):
-            lines.append("## Usage Examples\n")
+            lines.append("## 使用示例\n")
             for example in data['usage_examples']:
                 lines.append(f"```\n{example}\n```\n\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         
         return "".join(lines)
     
     def _format_task_list(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Tasks')}\n\n"]
+        lines = [f"# {data.get('title', '任务清单')}\n\n"]
         
         if data.get('tasks'):
-            lines.append("## Task List\n")
+            lines.append("## 任务清单\n")
             for task in data['tasks']:
                 task_desc = task.get('task', '')
-                priority = task.get('priority', 'Medium')
+                priority = task.get('priority', '中')
                 deadline = task.get('deadline', '')
-                status = task.get('status', 'Todo')
+                status = task.get('status', '待办')
                 
-                check_box = "[x]" if status == "Done" else "[ ]"
-                line = f"- {check_box} {task_desc} (Priority: {priority}"
+                check_box = "[x]" if status in ("已完成", "Done") else "[ ]"
+                line = f"- {check_box} {task_desc}（优先级：{priority}"
                 if deadline:
-                    line += f", @{deadline}"
-                line += ")\n"
+                    line += f"，@{deadline}"
+                line += "）\n"
                 lines.append(line)
             lines.append("\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         
         return "".join(lines)
     
     def _format_diary(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Diary Entry')}\n"]
+        lines = [f"# {data.get('title', '日记')}\n"]
         
         if data.get('date'):
-            lines.append(f"**Date:** {data['date']}\n")
+            lines.append(f"**日期：** {data['date']}\n")
         if data.get('mood'):
-            lines.append(f"**Mood:** {data['mood']}\n\n")
+            lines.append(f"**心情：** {data['mood']}\n\n")
         
         if data.get('events'):
-            lines.append("## Events\n")
+            lines.append("## 事件记录\n")
             for event in data['events']:
                 lines.append(f"- {event}\n")
             lines.append("\n")
         
         if data.get('reflections'):
-            lines.append("## Reflections\n")
+            lines.append("## 感悟\n")
             for reflection in data['reflections']:
                 lines.append(f"- {reflection}\n")
             lines.append("\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         
         return "".join(lines)
     
     def _format_generic_notes(self, data: Dict[str, Any]) -> str:
-        lines = [f"# {data.get('title', 'Untitled')}\n"]
+        lines = [f"# {data.get('title', '笔记')}\n"]
         
         if data.get('summary'):
-            lines.extend(["## Summary\n", data['summary'] + "\n\n"])
+            lines.extend(["## 摘要\n", data['summary'] + "\n\n"])
         
         if data.get('key_points'):
-            lines.append("## Key Points\n")
+            lines.append("## 要点\n")
             for point in data['key_points']:
                 lines.append(f"- {point}\n")
             lines.append("\n")
         
         if data.get('suggested_links'):
-            lines.extend(["## Related Topics\n"])
+            lines.extend(["## 相关主题\n"])
             for link in data['suggested_links']:
                 lines.append(f"- {link}\n")
             lines.append("\n")
         
         if data.get('tags'):
-            lines.append("## Tags\n")
+            lines.append("## 标签\n")
+            tags_str = " ".join([f"#{tag}" for tag in data['tags']])
+            lines.append(tags_str + "\n")
+        
+        return "".join(lines)
+
+    def _format_knowledge_essay(self, data: Dict[str, Any]) -> str:
+        lines = [f"# {data.get('title', '知识随笔')}\n"]
+        
+        if data.get('core_idea'):
+            lines.extend(["## 核心观点\n", data['core_idea'] + "\n\n"])
+        
+        if data.get('key_insights'):
+            lines.append("## 关键洞见\n")
+            for insight in data['key_insights']:
+                lines.append(f"- {insight}\n")
+            lines.append("\n")
+        
+        if data.get('extended_thinking'):
+            lines.append("## 延伸思考\n")
+            for thought in data['extended_thinking']:
+                lines.append(f"- {thought}\n")
+            lines.append("\n")
+        
+        if data.get('related_concepts'):
+            lines.append("## 关联概念\n")
+            for concept in data['related_concepts']:
+                lines.append(f"- {concept}\n")
+            lines.append("\n")
+        
+        if data.get('notable_quotes'):
+            lines.append("## 金句\n")
+            for quote in data['notable_quotes']:
+                lines.append(f"> {quote}\n\n")
+        
+        if data.get('tags'):
+            lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
         

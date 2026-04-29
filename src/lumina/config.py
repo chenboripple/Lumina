@@ -53,6 +53,9 @@ class OutputConfig:
         "by_type": True,
         "flat": False,
     })
+
+    # 知识分类目录映射（scene_type -> 目录名），覆盖 Planner 默认映射
+    categories: Dict[str, str] = field(default_factory=dict)
     
     # 命名约定
     naming: Dict[str, bool] = field(default_factory=lambda: {
@@ -190,6 +193,7 @@ class LuminaConfig:
             vault_path=output_data.get("vault_path"),
             structure=output_data.get("structure", {}),
             naming=output_data.get("naming", {}),
+            categories=output_data.get("categories", {}),
         )
         
         # 解析 LLM 配置（使用 llm.py 中的 LLMConfig）

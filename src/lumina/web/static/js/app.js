@@ -25,7 +25,6 @@ const views = {
 const navButtons = document.querySelectorAll('.nav-btn');
 const modal = document.getElementById('note-modal');
 const loadingOverlay = document.getElementById('loading-overlay');
-const toast = document.getElementById('toast');
 
 // 初始化
 function init() {
@@ -47,17 +46,16 @@ function setupNavigation() {
 }
 
 function switchView(viewName) {
-    // 更新导航按钮
     navButtons.forEach(btn => {
         btn.classList.toggle('active', btn.dataset.view === viewName);
     });
 
-    // 切换视图
     Object.values(views).forEach(view => view.classList.remove('active'));
-    views[viewName].classList.add('active');
+    if (views[viewName]) {
+        views[viewName].classList.add('active');
+    }
     state.currentView = viewName;
 
-    // 视图特定初始化
     if (viewName === 'graph') {
         loadGraph();
     } else if (viewName === 'notes') {
@@ -88,6 +86,20 @@ function setupEventListeners() {
     document.getElementById('btn-scan').addEventListener('click', scanDirectory);
     document.getElementById('btn-batch-repair').addEventListener('click', batchRepair);
     document.getElementById('btn-refresh').addEventListener('click', refreshData);
+
+    // 按源文件重生成
+    const sourceInput = document.getElementById('source-file-input');
+    const regenerateSourceBtn = document.getElementById('btn-regenerate-source');
+    if (regenerateSourceBtn) {
+        regenerateSourceBtn.addEventListener('click', regenerateBySourcePath);
+    }
+    if (sourceInput) {
+        sourceInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                regenerateBySourcePath();
+            }
+        });
+    }
 }
 
 // API 请求
@@ -98,8 +110,7 @@ async function apiRequest(endpoint, options = {}) {
                 'Content-Type': 'application/json'
             }
         };
-        
-        // 合并选项，确保 headers 正确合并
+
         const mergedOptions = {
             ...defaultOptions,
             ...options,
@@ -108,11 +119,19 @@ async function apiRequest(endpoint, options = {}) {
                 ...(options.headers || {})
             }
         };
-        
+
         const response = await fetch(`${API_BASE}${endpoint}`, mergedOptions);
 
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            let detail = '';
+            try {
+                const err = await response.json();
+                detail = err?.error || err?.message || '';
+            } catch (_) {
+                // ignore non-JSON response
+            }
+            const suffix = detail ? ` - ${detail}` : '';
+            throw new Error(`HTTP ${response.status}: ${response.statusText}${suffix}`);
         }
 
         return await response.json();
@@ -126,15 +145,14 @@ async function apiRequest(endpoint, options = {}) {
 async function loadDashboardData() {
     try {
         const stats = await apiRequest('/api/stats');
-        
+
         document.getElementById('stat-notes').textContent = stats.total_notes || 0;
         document.getElementById('stat-processed').textContent = stats.total_files_processed || 0;
         document.getElementById('stat-score').textContent = (stats.avg_score || 0).toFixed(2);
-        document.getElementById('stat-vector').textContent = 
+        document.getElementById('stat-vector').textContent =
             stats.vector_store?.total_documents || 0;
-        renderRecentProcessedFiles(stats.recent_processed_files || []);
+        renderProcessedFiles(stats.recent_processed_files || []);
 
-        // 更新状态显示
         const statusDisplay = document.getElementById('status-display');
         if (stats.status && stats.status !== 'idle') {
             statusDisplay.innerHTML = `
@@ -155,7 +173,7 @@ function buildFileTree(files) {
         const i = (f.file_path || '').lastIndexOf('/');
         return i >= 0 ? f.file_path.substring(0, i) : '';
     });
-    let prefix = dirs[0] + '/';
+    let prefix = dirs.length ? (dirs[0] + '/') : '';
     for (const d of dirs) {
         const p = d + '/';
         let i = 0;
@@ -217,7 +235,7 @@ function renderTreeNode(node, idPrefix) {
     return html;
 }
 
-function renderRecentProcessedFiles(files) {
+function renderProcessedFiles(files) {
     const container = document.getElementById('processed-files-list');
     if (!container) return;
     if (!files || files.length === 0) {
@@ -248,7 +266,7 @@ async function performSearch() {
     if (!query) return;
 
     showLoading(true);
-    
+
     try {
         const results = await apiRequest('/api/search', {
             method: 'POST',
@@ -265,7 +283,7 @@ async function performSearch() {
 
 function displaySearchResults(data) {
     const container = document.getElementById('search-results');
-    
+
     if (!data.results || data.results.length === 0) {
         container.innerHTML = '<p class="hint">未找到相关结果</p>';
         return;
@@ -283,7 +301,6 @@ function displaySearchResults(data) {
         </div>
     `).join('');
 
-    // 添加点击事件
     container.querySelectorAll('.search-result').forEach(el => {
         el.addEventListener('click', () => openNoteDetail(el.dataset.id));
     });
@@ -292,7 +309,7 @@ function displaySearchResults(data) {
 // 知识图谱
 async function loadGraph() {
     const container = document.getElementById('graph-container');
-    
+
     if (state.graph) {
         state.graph.destroy();
     }
@@ -309,15 +326,14 @@ async function loadGraph() {
             return;
         }
 
-        // 使用 vis-network 渲染
         const nodes = new vis.DataSet(
             data.nodes.map(node => ({
                 id: node.id,
                 label: node.title || node.id,
                 title: `Score: ${node.score?.toFixed(2) || 'N/A'}`,
                 color: {
-                    background: '#6366f1',
-                    border: '#4f46e5'
+                    background: '#1565c0',
+                    border: '#0d47a1'
                 }
             }))
         );
@@ -336,14 +352,14 @@ async function loadGraph() {
                 shape: 'dot',
                 size: 16,
                 font: {
-                    color: '#f8fafc',
+                    color: '#ffffff',
                     size: 14
                 }
             },
             edges: {
                 color: {
-                    color: '#475569',
-                    highlight: '#6366f1'
+                    color: '#90a4ae',
+                    highlight: '#1565c0'
                 },
                 smooth: {
                     type: 'continuous'
@@ -366,7 +382,6 @@ async function loadGraph() {
 
         state.graph = new vis.Network(container, { nodes, edges }, options);
 
-        // 点击节点打开笔记
         state.graph.on('click', (params) => {
             if (params.nodes.length > 0) {
                 openNoteDetail(params.nodes[0]);
@@ -405,7 +420,6 @@ async function loadNotes() {
             </div>
         `).join('');
 
-        // 添加点击事件
         container.querySelectorAll('.note-card').forEach(el => {
             el.addEventListener('click', () => openNoteDetail(el.dataset.id));
         });
@@ -421,7 +435,7 @@ async function openNoteDetail(noteId) {
 
     try {
         const note = await apiRequest(`/api/notes/${encodeURIComponent(noteId)}`);
-        
+
         document.getElementById('modal-title').textContent = note.title || '笔记详情';
         document.getElementById('modal-body').innerHTML = `
             <div class="note-detail">
@@ -474,7 +488,8 @@ async function regenerateNote() {
         if (result.success) {
             showToast('笔记重新生成成功！');
             closeModal();
-            loadNotes();
+            await loadDashboardData();
+            await loadNotes();
         } else {
             showToast('重新生成失败: ' + result.message, 'error');
         }
@@ -482,6 +497,42 @@ async function regenerateNote() {
         console.error('Failed to regenerate note:', error);
         showToast('重新生成失败', 'error');
     } finally {
+        showLoading(false);
+    }
+}
+
+async function regenerateBySourcePath() {
+    const input = document.getElementById('source-file-input');
+    const btn = document.getElementById('btn-regenerate-source');
+    if (!input || !btn) return;
+
+    const sourcePath = input.value.trim();
+    if (!sourcePath) {
+        showToast('请先输入源文件路径', 'error');
+        return;
+    }
+
+    btn.disabled = true;
+    showLoading(true);
+
+    try {
+        const result = await apiRequest('/api/regenerate-source', {
+            method: 'POST',
+            body: JSON.stringify({ source_path: sourcePath })
+        });
+
+        if (result.success) {
+            showToast('指定源文件笔记已重新生成');
+            await loadDashboardData();
+            await loadNotes();
+        } else {
+            showToast('重新生成失败: ' + (result.message || '未知错误'), 'error');
+        }
+    } catch (error) {
+        console.error('Regenerate by source failed:', error);
+        showToast('重新生成失败: ' + error.message, 'error');
+    } finally {
+        btn.disabled = false;
         showLoading(false);
     }
 }
@@ -497,17 +548,17 @@ async function loadConfig() {
             <form id="config-update-form">
                 <div class="form-group">
                     <label class="form-label">最大迭代次数</label>
-                    <input type="number" class="form-input" name="max_iterations" 
+                    <input type="number" class="form-input" name="max_iterations"
                            value="${config.max_iterations}" min="1" max="10">
                 </div>
                 <div class="form-group">
                     <label class="form-label">质量阈值</label>
-                    <input type="number" class="form-input" name="quality_threshold" 
+                    <input type="number" class="form-input" name="quality_threshold"
                            value="${config.quality_threshold}" min="0" max="1" step="0.1">
                 </div>
                 <div class="form-group">
                     <label class="form-label">输出目录</label>
-                    <input type="text" class="form-input" name="output_dir" 
+                    <input type="text" class="form-input" name="output_dir"
                            value="${config.output_dir}">
                 </div>
                 <div class="form-group">
@@ -518,17 +569,17 @@ async function loadConfig() {
                     </select>
                 </div>
                 <div class="form-group form-checkbox">
-                    <input type="checkbox" id="incremental" name="incremental" 
+                    <input type="checkbox" id="incremental" name="incremental"
                            ${config.incremental ? 'checked' : ''}>
                     <label for="incremental">增量处理</label>
                 </div>
                 <div class="form-group form-checkbox">
-                    <input type="checkbox" id="parallel" name="parallel" 
+                    <input type="checkbox" id="parallel" name="parallel"
                            ${config.parallel ? 'checked' : ''}>
                     <label for="parallel">并行处理</label>
                 </div>
                 <div class="form-group form-checkbox">
-                    <input type="checkbox" id="enable_vector_store" name="enable_vector_store" 
+                    <input type="checkbox" id="enable_vector_store" name="enable_vector_store"
                            ${config.enable_vector_store ? 'checked' : ''}>
                     <label for="enable_vector_store">启用向量存储</label>
                 </div>
@@ -536,12 +587,11 @@ async function loadConfig() {
             </form>
         `;
 
-        // 表单提交
         document.getElementById('config-update-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             const formData = new FormData(e.target);
             const newConfig = {};
-            
+
             formData.forEach((value, key) => {
                 if (value === 'on') {
                     newConfig[key] = true;
@@ -571,7 +621,41 @@ async function loadConfig() {
 
 // 快速操作
 async function scanDirectory() {
-    showToast('扫描功能需要在后端实现');
+    // 检查是否已在扫描
+    try {
+        const status = await apiRequest('/api/scan/status');
+        if (status.running) {
+            showToast('扫描已在进行中，请稍候…', 'warning');
+            return;
+        }
+    } catch (_) {}
+
+    showLoading(true);
+    showToast('正在启动扫描...');
+    try {
+        await apiRequest('/api/scan', { method: 'POST', body: JSON.stringify({ incremental: true }) });
+    } catch (error) {
+        showToast('启动扫描失败: ' + (error.message || error), 'error');
+        showLoading(false);
+        return;
+    }
+
+    // 轮询状态直到扫描结束
+    const pollInterval = setInterval(async () => {
+        try {
+            const status = await apiRequest('/api/scan/status');
+            if (!status.running) {
+                clearInterval(pollInterval);
+                showLoading(false);
+                showToast(status.message || '扫描完成');
+                await loadDashboardData();
+                await loadNotes();
+            }
+        } catch (_) {
+            clearInterval(pollInterval);
+            showLoading(false);
+        }
+    }, 2000);
 }
 
 async function batchRepair() {
@@ -584,8 +668,8 @@ async function batchRepair() {
         });
 
         showToast(`批量修复完成: ${result.repaired} 成功, ${result.failed} 失败`);
-        loadDashboardData();
-        loadNotes();
+        await loadDashboardData();
+        await loadNotes();
     } catch (error) {
         console.error('Batch repair failed:', error);
         showToast('批量修复失败', 'error');
@@ -609,9 +693,9 @@ function showLoading(show) {
 function showToast(message, type = 'success') {
     const toastEl = document.getElementById('toast');
     const messageEl = document.getElementById('toast-message');
-    
+
     messageEl.textContent = message;
-    toastEl.style.background = type === 'error' ? '#ef4444' : '#10b981';
+    toastEl.style.background = type === 'error' ? '#c62828' : '#2e7d32';
     toastEl.classList.remove('hidden');
 
     setTimeout(() => {

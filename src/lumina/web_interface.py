@@ -6,6 +6,7 @@ Web Management Interface - Web管理界面
 import os
 import json
 import time
+import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ class WebInterface:
         self.port = port
         self.app = None
         self.lumina_config = lumina_config
+        self._scan_state: Dict[str, Any] = {"running": False, "started_at": None, "message": ""}
         
         if not FLASK_AVAILABLE:
             raise ImportError(
@@ -190,40 +192,85 @@ class WebInterface:
             try:
                 data = request.get_json() or {}
                 source_path = data.get('source_path')
-                
-                if not source_path or not Path(source_path).exists():
-                    return jsonify({"error": "Source file not found"}), 404
+
+                if not source_path:
+                    return jsonify({"error": "source_path is required"}), 400
 
                 source_file = Path(source_path).expanduser().resolve()
-                allowed_source = self._resolve_allowed_source(source_file)
-                if not allowed_source:
-                    return jsonify({"error": "Source file is not allowed by current input.sources configuration"}), 400
+                if not source_file.exists():
+                    return jsonify({"error": "Source file not found"}), 404
+                return jsonify(self._regenerate_source_file(source_file))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
 
-                source_root, source_filter = allowed_source
-                scanned = self.harness.planner.scan(
-                    str(source_file),
-                    recursive=False,
-                    file_filter=source_filter,
-                    supported_extensions=self.harness.config.supported_extensions,
-                )
-                if not scanned:
-                    return jsonify({"error": "Source file is filtered out by current filter or supported_extensions settings"}), 400
-                
-                file_info = scanned[0]
-                
-                plan = {"strategy": "direct", "batches": [[file_info]]}
-                result = self.harness._process_single(file_info, plan)
-                
-                return jsonify({
-                    "success": result.get("success", False),
-                    "score": result.get("best_score", 0),
-                    "iterations": result.get("iterations", 0),
-                    "message": "Note regenerated successfully" if result.get("success") else "Failed to regenerate"
-                })
+        # API: 按指定源文件重新生成
+        @self.app.route('/api/regenerate-source', methods=['POST'])
+        def api_regenerate_source():
+            """按源文件路径重新生成笔记"""
+            if not self.harness:
+                return jsonify({"error": "Harness not available"}), 503
+
+            try:
+                data = request.get_json() or {}
+                source_path = data.get('source_path')
+
+                if not source_path:
+                    return jsonify({"error": "source_path is required"}), 400
+
+                source_file = Path(source_path).expanduser().resolve()
+                if not source_file.exists():
+                    return jsonify({"error": "Source file not found"}), 404
+
+                return jsonify(self._regenerate_source_file(source_file))
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
         
         # API: 批量修复
+        @self.app.route('/api/scan', methods=['POST'])
+        def api_scan():
+            """触发全量扫描并在后台处理所有配置的输入源"""
+            if not self.harness:
+                return jsonify({"error": "Harness not available"}), 503
+            if not self.lumina_config:
+                return jsonify({"error": "Config not available"}), 503
+            if self._scan_state["running"]:
+                return jsonify({"error": "扫描已在进行中，请稍后再试"}), 409
+
+            data = request.get_json() or {}
+            incremental = data.get("incremental", True)
+
+            def _do_scan():
+                self._scan_state["running"] = True
+                self._scan_state["started_at"] = datetime.now().isoformat()
+                self._scan_state["message"] = "扫描中..."
+                try:
+                    for source in self.lumina_config.input_sources:
+                        target_path = source.resolve_path()
+                        recursive = getattr(source, "recursive", True)
+                        file_filter = getattr(source, "filter", None)
+                        if not incremental:
+                            orig = self.harness.config.incremental
+                            self.harness.config.incremental = False
+                        try:
+                            self.harness.run(str(target_path), recursive=recursive, file_filter=file_filter)
+                        finally:
+                            if not incremental:
+                                self.harness.config.incremental = orig
+                    self._scan_state["message"] = "扫描完成"
+                except Exception as exc:
+                    self._scan_state["message"] = f"扫描出错: {exc}"
+                finally:
+                    self._scan_state["running"] = False
+
+            t = threading.Thread(target=_do_scan, daemon=True)
+            t.start()
+            return jsonify({"success": True, "message": "扫描已在后台启动"})
+
+        @self.app.route('/api/scan/status')
+        def api_scan_status():
+            """获取当前扫描状态"""
+            return jsonify(self._scan_state)
+
         @self.app.route('/api/batch-repair', methods=['POST'])
         def api_batch_repair():
             """批量修复低质量笔记"""
@@ -330,6 +377,45 @@ class WebInterface:
                 return source_root, source.filter
 
         return None
+
+    def _regenerate_source_file(self, source_file: Path) -> Dict[str, Any]:
+        """按单个源文件重新生成并保存笔记。"""
+        allowed_source = self._resolve_allowed_source(source_file)
+        if not allowed_source:
+            return {
+                "success": False,
+                "message": "Source file is not allowed by current input.sources configuration",
+            }
+
+        _, source_filter = allowed_source
+        scanned = self.harness.planner.scan(
+            str(source_file),
+            recursive=False,
+            file_filter=source_filter,
+            supported_extensions=self.harness.config.supported_extensions,
+        )
+        if not scanned:
+            return {
+                "success": False,
+                "message": "Source file is filtered out by current filter or supported_extensions settings",
+            }
+
+        file_info = scanned[0]
+        plan = {"strategy": "direct", "batches": [[file_info]]}
+        result = self.harness._process_single(file_info, plan)
+
+        if result.get("processed") and result.get("final_output"):
+            # 复用 Harness 保存逻辑，确保按插件规则写回目标目录
+            self.harness._save_outputs([result])
+
+        return {
+            "success": result.get("success", False),
+            "processed": result.get("processed", False),
+            "score": result.get("best_score", 0),
+            "iterations": result.get("iterations", 0),
+            "source": str(source_file),
+            "message": "Note regenerated successfully" if result.get("success") else "Failed to regenerate",
+        }
     
     def _get_dashboard_stats(self) -> Dict[str, Any]:
         """获取仪表板统计数据"""
@@ -373,7 +459,7 @@ class WebInterface:
                             source_roots.append(source.resolve_path())
 
                     recent_files = self.harness.change_tracker.get_recent_processed_files(
-                        limit=20,
+                        limit=10000,
                         roots=source_roots or None,
                     )
                     stats["recent_processed_files"] = [
