@@ -6,6 +6,7 @@ Web Management Interface - Web管理界面
 import os
 import json
 import time
+import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ class WebInterface:
         self.port = port
         self.app = None
         self.lumina_config = lumina_config
+        self._scan_state: Dict[str, Any] = {"running": False, "started_at": None, "message": ""}
         
         if not FLASK_AVAILABLE:
             raise ImportError(
@@ -224,6 +226,51 @@ class WebInterface:
                 return jsonify({"error": str(e)}), 500
         
         # API: 批量修复
+        @self.app.route('/api/scan', methods=['POST'])
+        def api_scan():
+            """触发全量扫描并在后台处理所有配置的输入源"""
+            if not self.harness:
+                return jsonify({"error": "Harness not available"}), 503
+            if not self.lumina_config:
+                return jsonify({"error": "Config not available"}), 503
+            if self._scan_state["running"]:
+                return jsonify({"error": "扫描已在进行中，请稍后再试"}), 409
+
+            data = request.get_json() or {}
+            incremental = data.get("incremental", True)
+
+            def _do_scan():
+                self._scan_state["running"] = True
+                self._scan_state["started_at"] = datetime.now().isoformat()
+                self._scan_state["message"] = "扫描中..."
+                try:
+                    for source in self.lumina_config.input_sources:
+                        target_path = source.resolve_path()
+                        recursive = getattr(source, "recursive", True)
+                        file_filter = getattr(source, "filter", None)
+                        if not incremental:
+                            orig = self.harness.config.incremental
+                            self.harness.config.incremental = False
+                        try:
+                            self.harness.run(str(target_path), recursive=recursive, file_filter=file_filter)
+                        finally:
+                            if not incremental:
+                                self.harness.config.incremental = orig
+                    self._scan_state["message"] = "扫描完成"
+                except Exception as exc:
+                    self._scan_state["message"] = f"扫描出错: {exc}"
+                finally:
+                    self._scan_state["running"] = False
+
+            t = threading.Thread(target=_do_scan, daemon=True)
+            t.start()
+            return jsonify({"success": True, "message": "扫描已在后台启动"})
+
+        @self.app.route('/api/scan/status')
+        def api_scan_status():
+            """获取当前扫描状态"""
+            return jsonify(self._scan_state)
+
         @self.app.route('/api/batch-repair', methods=['POST'])
         def api_batch_repair():
             """批量修复低质量笔记"""

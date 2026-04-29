@@ -621,7 +621,41 @@ async function loadConfig() {
 
 // 快速操作
 async function scanDirectory() {
-    showToast('扫描功能需要在后端实现');
+    // 检查是否已在扫描
+    try {
+        const status = await apiRequest('/api/scan/status');
+        if (status.running) {
+            showToast('扫描已在进行中，请稍候…', 'warning');
+            return;
+        }
+    } catch (_) {}
+
+    showLoading(true);
+    showToast('正在启动扫描...');
+    try {
+        await apiRequest('/api/scan', { method: 'POST', body: JSON.stringify({ incremental: true }) });
+    } catch (error) {
+        showToast('启动扫描失败: ' + (error.message || error), 'error');
+        showLoading(false);
+        return;
+    }
+
+    // 轮询状态直到扫描结束
+    const pollInterval = setInterval(async () => {
+        try {
+            const status = await apiRequest('/api/scan/status');
+            if (!status.running) {
+                clearInterval(pollInterval);
+                showLoading(false);
+                showToast(status.message || '扫描完成');
+                await loadDashboardData();
+                await loadNotes();
+            }
+        } catch (_) {
+            clearInterval(pollInterval);
+            showLoading(false);
+        }
+    }, 2000);
 }
 
 async function batchRepair() {
