@@ -190,36 +190,36 @@ class WebInterface:
             try:
                 data = request.get_json() or {}
                 source_path = data.get('source_path')
-                
-                if not source_path or not Path(source_path).exists():
-                    return jsonify({"error": "Source file not found"}), 404
+
+                if not source_path:
+                    return jsonify({"error": "source_path is required"}), 400
 
                 source_file = Path(source_path).expanduser().resolve()
-                allowed_source = self._resolve_allowed_source(source_file)
-                if not allowed_source:
-                    return jsonify({"error": "Source file is not allowed by current input.sources configuration"}), 400
+                if not source_file.exists():
+                    return jsonify({"error": "Source file not found"}), 404
+                return jsonify(self._regenerate_source_file(source_file))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
 
-                source_root, source_filter = allowed_source
-                scanned = self.harness.planner.scan(
-                    str(source_file),
-                    recursive=False,
-                    file_filter=source_filter,
-                    supported_extensions=self.harness.config.supported_extensions,
-                )
-                if not scanned:
-                    return jsonify({"error": "Source file is filtered out by current filter or supported_extensions settings"}), 400
-                
-                file_info = scanned[0]
-                
-                plan = {"strategy": "direct", "batches": [[file_info]]}
-                result = self.harness._process_single(file_info, plan)
-                
-                return jsonify({
-                    "success": result.get("success", False),
-                    "score": result.get("best_score", 0),
-                    "iterations": result.get("iterations", 0),
-                    "message": "Note regenerated successfully" if result.get("success") else "Failed to regenerate"
-                })
+        # API: 按指定源文件重新生成
+        @self.app.route('/api/regenerate-source', methods=['POST'])
+        def api_regenerate_source():
+            """按源文件路径重新生成笔记"""
+            if not self.harness:
+                return jsonify({"error": "Harness not available"}), 503
+
+            try:
+                data = request.get_json() or {}
+                source_path = data.get('source_path')
+
+                if not source_path:
+                    return jsonify({"error": "source_path is required"}), 400
+
+                source_file = Path(source_path).expanduser().resolve()
+                if not source_file.exists():
+                    return jsonify({"error": "Source file not found"}), 404
+
+                return jsonify(self._regenerate_source_file(source_file))
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
         
@@ -330,6 +330,45 @@ class WebInterface:
                 return source_root, source.filter
 
         return None
+
+    def _regenerate_source_file(self, source_file: Path) -> Dict[str, Any]:
+        """按单个源文件重新生成并保存笔记。"""
+        allowed_source = self._resolve_allowed_source(source_file)
+        if not allowed_source:
+            return {
+                "success": False,
+                "message": "Source file is not allowed by current input.sources configuration",
+            }
+
+        _, source_filter = allowed_source
+        scanned = self.harness.planner.scan(
+            str(source_file),
+            recursive=False,
+            file_filter=source_filter,
+            supported_extensions=self.harness.config.supported_extensions,
+        )
+        if not scanned:
+            return {
+                "success": False,
+                "message": "Source file is filtered out by current filter or supported_extensions settings",
+            }
+
+        file_info = scanned[0]
+        plan = {"strategy": "direct", "batches": [[file_info]]}
+        result = self.harness._process_single(file_info, plan)
+
+        if result.get("processed") and result.get("final_output"):
+            # 复用 Harness 保存逻辑，确保按插件规则写回目标目录
+            self.harness._save_outputs([result])
+
+        return {
+            "success": result.get("success", False),
+            "processed": result.get("processed", False),
+            "score": result.get("best_score", 0),
+            "iterations": result.get("iterations", 0),
+            "source": str(source_file),
+            "message": "Note regenerated successfully" if result.get("success") else "Failed to regenerate",
+        }
     
     def _get_dashboard_stats(self) -> Dict[str, Any]:
         """获取仪表板统计数据"""
@@ -373,7 +412,7 @@ class WebInterface:
                             source_roots.append(source.resolve_path())
 
                     recent_files = self.harness.change_tracker.get_recent_processed_files(
-                        limit=20,
+                        limit=10000,
                         roots=source_roots or None,
                     )
                     stats["recent_processed_files"] = [
