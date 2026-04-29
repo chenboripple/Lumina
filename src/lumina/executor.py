@@ -134,6 +134,7 @@ class Executor:
         # 1. 读取文件内容（智能分块）
         content_chunks = self._read_file_smart(file_info.path)
         full_content = "\n".join(content_chunks)
+        content_policy_metadata: Dict[str, Any] = {}
         
         # 2. 内容过滤检查
         if self.content_filter:
@@ -161,6 +162,21 @@ class Executor:
                         "timestamp": datetime.now().isoformat(),
                     }
                 )
+
+            content_policy_metadata = dict(filter_result.metadata or {})
+            sanitized_content, transform_meta = self.content_filter.sanitize_content(
+                full_content,
+                content_policy_metadata,
+            )
+            if sanitized_content != full_content:
+                full_content = sanitized_content
+                content_chunks = [full_content] if len(full_content) <= self.CHUNK_SIZE else self._split_content(full_content)
+            content_policy_metadata.update(transform_meta)
+            file_info.metadata["content_policy"] = content_policy_metadata
+
+            guidance = self.content_filter.build_processing_guidance(content_policy_metadata)
+            if guidance:
+                file_info.metadata["content_guidance"] = guidance
         
         # 3. 场景检测
         detected_scene = None
@@ -214,6 +230,9 @@ class Executor:
             note = self._parse_scene_output(raw_output, file_info, context, template)
         else:
             note = self._parse_output(raw_output, file_info, context)
+
+        if self.content_filter and content_policy_metadata:
+            note = self._apply_content_policy(note, content_policy_metadata)
         
         # 9. 记录处理过程
         note.processing_info = {
@@ -306,12 +325,16 @@ class Executor:
             # 使用多模态提取器
             extractor = MultimodalExtractor()
             extracted = extractor.extract(path)
-            
-            if extracted.confidence > 0:
-                # 提取成功，返回提取的内容
+
+            # 对二进制/多模态类型，始终使用提取器结果，避免回退到 UTF-8 文本读取导致解码错误
+            if extracted.content_type in {"pdf", "image", "audio", "video", "code", "unknown"}:
                 return [extracted.text]
-            
-            # 如果提取器无法处理，回退到基本文本读取
+
+            if extracted.confidence > 0:
+                # 文本提取成功，返回提取的内容
+                return [extracted.text]
+
+            # 仅在可判定为普通文本文件时回退到基础文本读取
             return self._read_text_file(path)
             
         except Exception as e:
@@ -433,6 +456,9 @@ class Executor:
     
     def _build_scene_prompt(self, template, file_info, content: str, context: ExecutionContext) -> str:
         """构建场景化单块提示词"""
+        guidance = file_info.metadata.get("content_guidance", "")
+        if guidance:
+            content = f"[Extraction Guidance]\n{guidance}\n\n{content}"
         return template.prompt_template.format(
             filename=file_info.path.name,
             file_type=file_info.type,
@@ -441,10 +467,13 @@ class Executor:
     
     def _build_scene_prompt_chunked(self, template, file_info, chunks: List[str], context: ExecutionContext) -> str:
         """构建场景化分块提示词"""
+        guidance = file_info.metadata.get("content_guidance", "")
         chunks_text = "\n\n".join([
             f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
             for i, chunk in enumerate(chunks)
         ])
+        if guidance:
+            chunks_text = f"[Extraction Guidance]\n{guidance}\n\n{chunks_text}"
         
         # 在模板中替换内容部分
         prompt = template.prompt_template.format(
@@ -506,6 +535,8 @@ class Executor:
     def _build_prompt_single(self, file_info, content: str, context: ExecutionContext) -> str:
         """构建单块提示词"""
         strategy = self._select_prompt_strategy(file_info)
+        guidance = file_info.metadata.get("content_guidance", "")
+        guidance_block = f"6. {guidance}\n" if guidance else ""
         
         return f"""You are a knowledge extraction expert. Analyze the following content and generate a structured note.
 
@@ -526,6 +557,7 @@ class Executor:
 3. Identify potential links to other topics
 4. Suggest relevant tags
 5. Assess content complexity and confidence
+{guidance_block}
 
 ## Output Format
 Return JSON with this structure:
@@ -545,6 +577,8 @@ Return JSON with this structure:
     
     def _build_prompt_chunked(self, file_info, chunks: List[str], context: ExecutionContext) -> str:
         """构建分块提示词"""
+        guidance = file_info.metadata.get("content_guidance", "")
+        guidance_block = f"7. {guidance}\n" if guidance else ""
         chunks_text = "\n\n".join([
             f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
             for i, chunk in enumerate(chunks)
@@ -568,6 +602,7 @@ Return JSON with this structure:
 4. Identify potential links to other topics
 5. Suggest relevant tags
 6. Assess overall complexity and confidence
+{guidance_block}
 
 ## Output Format
 Return JSON with this structure:
@@ -702,6 +737,33 @@ Return JSON with this structure:
                     "timestamp": datetime.now().isoformat(),
                 }
             )
+
+    def _apply_content_policy(self, note: NoteOutput, content_policy_metadata: Dict[str, Any]) -> NoteOutput:
+        """在输出阶段执行兜底脱敏，并记录内容策略。"""
+        if not self.content_filter:
+            return note
+
+        masked_content, transform_meta = self.content_filter.sanitize_content(
+            note.content,
+            {
+                **content_policy_metadata,
+                "downgrade_sample_facts": False,
+                "mask_sensitive": content_policy_metadata.get("mask_sensitive", False),
+            },
+        )
+        note.content = masked_content
+        note.title = self.content_filter.mask_sensitive_text(note.title)
+        note.tags = [self.content_filter.mask_sensitive_text(tag) for tag in note.tags]
+        note.links = [self.content_filter.mask_sensitive_text(link) for link in note.links]
+        note.metadata = {
+            **note.metadata,
+            "content_policy": {
+                key: value
+                for key, value in {**content_policy_metadata, **transform_meta}.items()
+                if key not in {"reason", "confidence"}
+            },
+        }
+        return note
     
     def _extract_json(self, text: str) -> str:
         """从文本中提取 JSON"""

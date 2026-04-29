@@ -45,7 +45,45 @@ class WebInterface:
         self.port = port
         self.app = None
         self.lumina_config = lumina_config
-        self._scan_state: Dict[str, Any] = {"running": False, "started_at": None, "message": ""}
+        self._scan_state: Dict[str, Any] = {
+            "running": False,
+            "started_at": None,
+            "message": "",
+            "current_source": "",
+            "current_source_index": -1,
+            "sources_total": 0,
+            "progress_percent": 0.0,
+            "elapsed_seconds": 0.0,
+            "eta_seconds": None,
+            "rate_per_minute": 0.0,
+            "source_counts": {
+                "pending": 0,
+                "processing": 0,
+                "completed": 0,
+                "failed": 0,
+            },
+            "file_counts": {
+                "total": 0,
+                "completed": 0,
+                "processed": 0,
+                "failed": 0,
+                "skipped": 0,
+                "pending": 0,
+            },
+            "failed_items": [],
+            "queue": [],
+            "_failure_counter": 0,
+            "_scan_baseline": {
+                "processed_files": 0,
+                "failed_files": 0,
+                "skipped_files": 0,
+            },
+            "_source_baseline": {
+                "processed_files": 0,
+                "failed_files": 0,
+                "skipped_files": 0,
+            },
+        }
         
         if not FLASK_AVAILABLE:
             raise ImportError(
@@ -239,28 +277,134 @@ class WebInterface:
             data = request.get_json() or {}
             incremental = data.get("incremental", True)
 
+            sources = list(self.lumina_config.input_sources or [])
+            queue = []
+            for source in sources:
+                queue.append({
+                    "source": str(source.resolve_path()),
+                    "status": "pending",
+                    "total_files": 0,
+                    "processed": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "completed": 0,
+                    "progress_percent": 0.0,
+                })
+
+            baseline = self.harness.get_state() if self.harness else {}
+            self._scan_state.update({
+                "running": False,
+                "started_at": None,
+                "message": "准备扫描...",
+                "current_source": "",
+                "current_source_index": -1,
+                "sources_total": len(queue),
+                "progress_percent": 0.0,
+                "elapsed_seconds": 0.0,
+                "eta_seconds": None,
+                "rate_per_minute": 0.0,
+                "source_counts": {
+                    "pending": len(queue),
+                    "processing": 0,
+                    "completed": 0,
+                    "failed": 0,
+                },
+                "file_counts": {
+                    "total": 0,
+                    "completed": 0,
+                    "processed": 0,
+                    "failed": 0,
+                    "skipped": 0,
+                    "pending": 0,
+                },
+                "failed_items": [],
+                "queue": queue,
+                "_failure_counter": 0,
+                "_scan_baseline": {
+                    "processed_files": baseline.get("processed_files", 0),
+                    "failed_files": baseline.get("failed_files", 0),
+                    "skipped_files": baseline.get("skipped_files", 0),
+                },
+                "_source_baseline": {
+                    "processed_files": baseline.get("processed_files", 0),
+                    "failed_files": baseline.get("failed_files", 0),
+                    "skipped_files": baseline.get("skipped_files", 0),
+                },
+            })
+
             def _do_scan():
                 self._scan_state["running"] = True
                 self._scan_state["started_at"] = datetime.now().isoformat()
                 self._scan_state["message"] = "扫描中..."
                 try:
-                    for source in self.lumina_config.input_sources:
+                    for idx, source in enumerate(self.lumina_config.input_sources):
                         target_path = source.resolve_path()
                         recursive = getattr(source, "recursive", True)
                         file_filter = getattr(source, "filter", None)
+                        self._scan_state["current_source"] = str(target_path)
+                        self._scan_state["current_source_index"] = idx
+                        if idx < len(self._scan_state["queue"]):
+                            self._scan_state["queue"][idx]["status"] = "processing"
+
+                        source_baseline = self.harness.get_state() if self.harness else {}
+                        self._scan_state["_source_baseline"] = {
+                            "processed_files": source_baseline.get("processed_files", 0),
+                            "failed_files": source_baseline.get("failed_files", 0),
+                            "skipped_files": source_baseline.get("skipped_files", 0),
+                        }
+                        source_error_index = len(getattr(self.harness.state, "errors", [])) if self.harness else 0
+
                         if not incremental:
                             orig = self.harness.config.incremental
                             self.harness.config.incremental = False
                         try:
-                            self.harness.run(str(target_path), recursive=recursive, file_filter=file_filter)
+                            report = self.harness.run(str(target_path), recursive=recursive, file_filter=file_filter)
+
+                            stats = report.get("statistics", {}) if isinstance(report, dict) else {}
+                            after_state = self.harness.get_state() if self.harness else {}
+                            total_files = int(stats.get("total_files", 0) or after_state.get("total_files", 0) or 0)
+                            processed_files = max(0, int(after_state.get("processed_files", 0)) - int(source_baseline.get("processed_files", 0)))
+                            failed_files = max(0, int(after_state.get("failed_files", 0)) - int(source_baseline.get("failed_files", 0)))
+                            skipped_files = max(0, int(after_state.get("skipped_files", 0)) - int(source_baseline.get("skipped_files", 0)))
+
+                            if idx < len(self._scan_state["queue"]):
+                                item = self._scan_state["queue"][idx]
+                                item["total_files"] = total_files
+                                item["processed"] = processed_files
+                                item["failed"] = failed_files
+                                item["skipped"] = skipped_files
+                                item["completed"] = processed_files + failed_files + skipped_files
+                                item["progress_percent"] = (
+                                    (item["completed"] / total_files) * 100.0 if total_files > 0 else 100.0
+                                )
+                                item["status"] = "failed" if str(report.get("status", "")).lower() == "failed" else "completed"
+
+                            current_errors = list(getattr(self.harness.state, "errors", [])) if self.harness else []
+                            for error in current_errors[source_error_index:]:
+                                self._append_failed_item(
+                                    source=str(target_path),
+                                    file=error.get("file", str(target_path)),
+                                    message=error.get("message") or error.get("error") or str(error),
+                                )
                         finally:
                             if not incremental:
                                 self.harness.config.incremental = orig
                     self._scan_state["message"] = "扫描完成"
                 except Exception as exc:
+                    idx = self._scan_state.get("current_source_index", -1)
+                    if isinstance(idx, int) and idx >= 0 and idx < len(self._scan_state["queue"]):
+                        self._scan_state["queue"][idx]["status"] = "failed"
+                    self._append_failed_item(
+                        source=self._scan_state.get("current_source") or "",
+                        file=self._scan_state.get("current_source") or "",
+                        message=str(exc),
+                    )
                     self._scan_state["message"] = f"扫描出错: {exc}"
                 finally:
+                    self._scan_state["current_source"] = ""
+                    self._scan_state["current_source_index"] = -1
                     self._scan_state["running"] = False
+                    self._refresh_scan_state_runtime()
 
             t = threading.Thread(target=_do_scan, daemon=True)
             t.start()
@@ -269,7 +413,97 @@ class WebInterface:
         @self.app.route('/api/scan/status')
         def api_scan_status():
             """获取当前扫描状态"""
-            return jsonify(self._scan_state)
+            self._refresh_scan_state_runtime()
+            public = {k: v for k, v in self._scan_state.items() if not k.startswith("_")}
+            return jsonify(public)
+
+        @self.app.route('/api/scan/failures/regenerate', methods=['POST'])
+        def api_scan_failures_regenerate():
+            """批量重生成失败项对应的源文件。"""
+            if not self.harness:
+                return jsonify({"error": "Harness not available"}), 503
+
+            data = request.get_json() or {}
+            ids = set(data.get("ids", []))
+            if not ids:
+                return jsonify({"error": "ids is required"}), 400
+
+            details = []
+            success_count = 0
+            failed_count = 0
+
+            for item in self._scan_state.get("failed_items", []):
+                if item.get("id") not in ids:
+                    continue
+
+                file_path = Path(str(item.get("file", ""))).expanduser()
+                if not file_path.exists() or not file_path.is_file():
+                    item["status"] = "retry_failed"
+                    item["last_error"] = "File not found or not a file"
+                    details.append({"id": item.get("id"), "success": False, "message": item["last_error"]})
+                    failed_count += 1
+                    continue
+
+                result = self._regenerate_source_file(file_path)
+                ok = bool(result.get("success"))
+                item["status"] = "resolved" if ok else "retry_failed"
+                item["last_retry_at"] = datetime.now().isoformat()
+                item["last_error"] = "" if ok else str(result.get("message", "Failed to regenerate"))
+                details.append({
+                    "id": item.get("id"),
+                    "success": ok,
+                    "message": result.get("message", ""),
+                    "source": result.get("source", str(file_path)),
+                })
+                if ok:
+                    success_count += 1
+                else:
+                    failed_count += 1
+
+            return jsonify({
+                "total": success_count + failed_count,
+                "success": success_count,
+                "failed": failed_count,
+                "details": details,
+            })
+
+        @self.app.route('/api/scan/failures/delete', methods=['POST'])
+        def api_scan_failures_delete():
+            """从失败列表中批量删除失败项记录。"""
+            data = request.get_json() or {}
+            ids = set(data.get("ids", []))
+            if not ids:
+                return jsonify({"error": "ids is required"}), 400
+
+            before = len(self._scan_state.get("failed_items", []))
+            self._scan_state["failed_items"] = [
+                item for item in self._scan_state.get("failed_items", [])
+                if item.get("id") not in ids
+            ]
+            deleted = before - len(self._scan_state.get("failed_items", []))
+            return jsonify({"deleted": deleted, "remaining": len(self._scan_state.get("failed_items", []))})
+
+        @self.app.route('/api/scan/failures/tag', methods=['POST'])
+        def api_scan_failures_tag():
+            """为失败项批量打标签。"""
+            data = request.get_json() or {}
+            ids = set(data.get("ids", []))
+            tags = [str(tag).strip() for tag in data.get("tags", []) if str(tag).strip()]
+            if not ids:
+                return jsonify({"error": "ids is required"}), 400
+            if not tags:
+                return jsonify({"error": "tags is required"}), 400
+
+            updated = 0
+            for item in self._scan_state.get("failed_items", []):
+                if item.get("id") not in ids:
+                    continue
+                existing = set(item.get("tags", []))
+                existing.update(tags)
+                item["tags"] = sorted(existing)
+                updated += 1
+
+            return jsonify({"updated": updated, "tags": tags})
 
         @self.app.route('/api/batch-repair', methods=['POST'])
         def api_batch_repair():
@@ -485,6 +719,107 @@ class WebInterface:
             pass
         
         return stats
+
+    def _refresh_scan_state_runtime(self):
+        """根据当前 queue 与 harness 状态刷新扫描进度。"""
+        queue = self._scan_state.get("queue", [])
+        if not isinstance(queue, list):
+            queue = []
+
+        # 扫描运行中：把当前 source 的实时文件进度映射到 queue
+        if self._scan_state.get("running") and self.harness:
+            idx = self._scan_state.get("current_source_index", -1)
+            if isinstance(idx, int) and 0 <= idx < len(queue):
+                try:
+                    live = self.harness.get_state()
+                    baseline = self._scan_state.get("_source_baseline", {})
+                    processed = max(0, int(live.get("processed_files", 0)) - int(baseline.get("processed_files", 0)))
+                    failed = max(0, int(live.get("failed_files", 0)) - int(baseline.get("failed_files", 0)))
+                    skipped = max(0, int(live.get("skipped_files", 0)) - int(baseline.get("skipped_files", 0)))
+                    completed = processed + failed + skipped
+                    total = max(int(queue[idx].get("total_files", 0)), int(live.get("total_files", 0)), completed)
+
+                    queue[idx]["processed"] = processed
+                    queue[idx]["failed"] = failed
+                    queue[idx]["skipped"] = skipped
+                    queue[idx]["completed"] = completed
+                    queue[idx]["total_files"] = total
+                    queue[idx]["progress_percent"] = (completed / total) * 100.0 if total > 0 else 0.0
+                    queue[idx]["status"] = "processing"
+                except Exception:
+                    pass
+
+        # 聚合 source 级状态
+        source_counts = {
+            "pending": len([q for q in queue if q.get("status") == "pending"]),
+            "processing": len([q for q in queue if q.get("status") == "processing"]),
+            "completed": len([q for q in queue if q.get("status") == "completed"]),
+            "failed": len([q for q in queue if q.get("status") == "failed"]),
+        }
+
+        # 聚合文件级状态
+        total_files = sum(int(q.get("total_files", 0) or 0) for q in queue)
+        processed_files = sum(int(q.get("processed", 0) or 0) for q in queue)
+        failed_files = sum(int(q.get("failed", 0) or 0) for q in queue)
+        skipped_files = sum(int(q.get("skipped", 0) or 0) for q in queue)
+        completed_files = processed_files + failed_files + skipped_files
+        pending_files = max(0, total_files - completed_files)
+
+        # 若仍未知 total_files，退化为 source 级进度
+        if total_files > 0:
+            progress_percent = (completed_files / total_files) * 100.0
+        else:
+            done_sources = source_counts["completed"] + source_counts["failed"]
+            sources_total = max(1, int(self._scan_state.get("sources_total", 0) or 0))
+            progress_percent = (done_sources / sources_total) * 100.0 if self._scan_state.get("sources_total", 0) else 0.0
+
+        started_at = self._scan_state.get("started_at")
+        elapsed_seconds = 0.0
+        eta_seconds = None
+        rate_per_minute = 0.0
+        if started_at:
+            try:
+                start_dt = datetime.fromisoformat(str(started_at))
+                elapsed_seconds = max(0.0, (datetime.now() - start_dt).total_seconds())
+            except Exception:
+                elapsed_seconds = 0.0
+
+        if elapsed_seconds > 0:
+            progress_units_total = total_files if total_files > 0 else int(self._scan_state.get("sources_total", 0) or 0)
+            progress_units_done = completed_files if total_files > 0 else (source_counts["completed"] + source_counts["failed"])
+            if progress_units_done > 0:
+                rate_per_minute = (progress_units_done / elapsed_seconds) * 60.0
+                remaining = max(0, progress_units_total - progress_units_done)
+                eta_seconds = (remaining / progress_units_done) * elapsed_seconds if remaining > 0 else 0.0
+
+        self._scan_state["queue"] = queue
+        self._scan_state["source_counts"] = source_counts
+        self._scan_state["file_counts"] = {
+            "total": total_files,
+            "completed": completed_files,
+            "processed": processed_files,
+            "failed": failed_files,
+            "skipped": skipped_files,
+            "pending": pending_files,
+        }
+        self._scan_state["progress_percent"] = round(progress_percent, 2)
+        self._scan_state["elapsed_seconds"] = round(elapsed_seconds, 1)
+        self._scan_state["eta_seconds"] = round(eta_seconds, 1) if eta_seconds is not None else None
+        self._scan_state["rate_per_minute"] = round(rate_per_minute, 2)
+
+    def _append_failed_item(self, source: str, file: str, message: str, tags: Optional[List[str]] = None):
+        """向失败列表追加标准化失败项。"""
+        self._scan_state["_failure_counter"] = int(self._scan_state.get("_failure_counter", 0)) + 1
+        self._scan_state.setdefault("failed_items", []).append({
+            "id": f"failure_{self._scan_state['_failure_counter']}",
+            "source": str(source or ""),
+            "file": str(file or source or ""),
+            "message": str(message or "Unknown error"),
+            "tags": list(tags or []),
+            "status": "open",
+            "created_at": datetime.now().isoformat(),
+            "last_error": str(message or "Unknown error"),
+        })
     
     def _get_low_quality_notes(self, min_score: float) -> List[Dict]:
         """获取低质量笔记"""

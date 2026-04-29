@@ -172,6 +172,34 @@
         </div>
     </div>
 
+    <div id="failure-modal" class="modal hidden">
+        <div class="modal-content modal-content-narrow">
+            <div class="modal-header">
+                <h2>失败详情</h2>
+                <button class="modal-close" id="btn-close-failure-modal">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="failure-toolbar">
+                    <label class="failure-select-all">
+                        <input type="checkbox" id="failure-select-all">
+                        <span>全选</span>
+                    </label>
+                    <div class="failure-toolbar-actions">
+                        <input type="text" id="failure-tag-input" class="form-input failure-tag-input" placeholder="输入标签，逗号分隔">
+                        <button class="btn btn-secondary btn-sm" id="btn-failure-tag">批量打标签</button>
+                        <button class="btn btn-secondary btn-sm" id="btn-failure-export">导出</button>
+                        <button class="btn btn-warning btn-sm" id="btn-failure-regenerate">批量重生成</button>
+                        <button class="btn btn-secondary btn-sm" id="btn-failure-delete">删除记录</button>
+                    </div>
+                </div>
+                <div id="failure-modal-body"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="btn-close-failure-modal-2">关闭</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 加载遮罩 -->
     <div id="loading-overlay" class="overlay hidden">
         <div class="spinner"></div>

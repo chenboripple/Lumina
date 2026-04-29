@@ -1090,9 +1090,25 @@ class Harness:
     
     def _format_output(self, output: NoteOutput, result: Dict) -> str:
         """格式化输出内容（委托给插件渲染）"""
+        file_meta = result.get("file_info", {}).get("metadata", {}) if isinstance(result.get("file_info"), dict) else {}
+        note_subdir = str(file_meta.get("note_subdir", "")).strip("/")
+
+        para = ""
+        if note_subdir:
+            parts = [p for p in note_subdir.split("/") if p]
+            para_candidates = {"projects", "areas", "resources", "archive", "archives"}
+            for part in parts:
+                if part.lower() in para_candidates:
+                    para = "Archive" if part.lower() == "archives" else part
+                    break
+            if not para and parts:
+                para = parts[-1]
+
         # 构建元数据
         metadata = {
             **output.metadata,
+            "note_subdir": note_subdir,
+            "para": output.metadata.get("para") or para,
             f"{self.config.metadata_prefix}score": result["best_score"],
             f"{self.config.metadata_prefix}iterations": result["iterations"],
             f"{self.config.metadata_prefix}best_round": result["best_round"],

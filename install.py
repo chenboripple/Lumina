@@ -9,6 +9,8 @@ import sys
 import subprocess
 import platform
 import argparse
+import importlib.util
+import importlib.metadata
 from pathlib import Path
 
 
@@ -52,6 +54,75 @@ def install_dependencies():
     except subprocess.CalledProcessError as e:
         print(f"❌ 依赖安装失败: {e}")
         return False
+
+
+def _module_available(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except Exception:
+        return False
+
+
+def _is_chromadb_compatible() -> bool:
+    """当前项目使用旧版 Chroma 客户端配置，需 chromadb<0.5。"""
+    try:
+        version = importlib.metadata.version("chromadb")
+        parts = version.split(".")
+        major = int(parts[0]) if len(parts) > 0 else 0
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        if major >= 1:
+            return False
+        if major == 0 and minor >= 5:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_numpy_compatible_for_chromadb() -> bool:
+    """chromadb 0.4.x 在本项目路径下需要 numpy<2。"""
+    try:
+        version = importlib.metadata.version("numpy")
+        major = int(version.split(".")[0])
+        return major < 2
+    except Exception:
+        return False
+
+
+def ensure_runtime_dependencies():
+    """安装后补齐关键运行依赖（缺失则自动安装）。"""
+    deps = [
+        ("PyPDF2", "PyPDF2"),
+        ("pdfplumber", "pdfplumber"),
+        ("PyMuPDF", "fitz"),
+        ("chromadb", "chromadb"),
+        ("sentence-transformers", "sentence_transformers"),
+    ]
+
+    missing = [pkg for pkg, module in deps if not _module_available(module)]
+    if _module_available("chromadb") and not _is_chromadb_compatible():
+        missing.append("chromadb<0.5")
+    if _module_available("chromadb") and not _is_numpy_compatible_for_chromadb():
+        missing.append("numpy<2")
+    if not missing:
+        print("✅ 关键运行依赖检查通过")
+        return True
+
+    missing = list(dict.fromkeys(missing))
+    print(f"\n📦 检测到缺失运行依赖，正在安装: {', '.join(missing)}")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", *missing])
+    except subprocess.CalledProcessError as e:
+        print(f"❌ 关键运行依赖安装失败: {e}")
+        return False
+
+    still_missing = [pkg for pkg, module in deps if not _module_available(module)]
+    if still_missing:
+        print("❌ 安装后仍缺失依赖: " + ", ".join(still_missing))
+        return False
+
+    print("✅ 关键运行依赖安装完成")
+    return True
 
 
 def update_lumina():
@@ -227,6 +298,9 @@ def main():
         sys.exit(1)
     
     if not install_dependencies():
+        sys.exit(1)
+
+    if not ensure_runtime_dependencies():
         sys.exit(1)
     
     create_config()
