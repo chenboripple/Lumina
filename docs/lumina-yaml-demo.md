@@ -55,9 +55,35 @@ output:
   vault_path: "~/Obsidian/Vault" # Obsidian Vault 路径（使用 obsidian 插件时）
 
   structure:
-    by_date: false               # 按日期分子目录
-    by_type: true                # 按文件类型分子目录
+    by_date: false               # 按日期分子目录（PARA 模式下建议关闭）
+    by_type: false               # 按文件类型分子目录（PARA 模式下建议关闭）
     flat: false                  # 平铺（不分子目录）
+
+  # ── 第一层目录：生活场景 ──────────────────────
+  # 按关键词将笔记归入不同生活场景。未匹配则归入 default_scene。
+  # 不配置 scenes 时直接使用单层 PARA 目录。
+  scenes:
+    - name: "工作"
+      keywords: ["需求", "会议", "项目", "技术", "代码", "方案", "报告", "排期", "季度"]
+    - name: "生活"
+      keywords: ["日记", "健康", "家庭", "购物", "账单", "旅行"]
+    - name: "学习"
+      keywords: ["读书", "笔记", "课程", "学习", "摘录", "论文"]
+  default_scene: "工作"           # 关键词匹配失败时的兜底场景
+
+  # ── 第二层目录：PARA 分类 ─────────────────────
+  # 每个场景内按 PARA 方法论自动分入四个子目录：
+  #   Projects  — 有明确截止目标的临时项目（完成后可划掉）
+  #   Areas     — 需长期维护的责任/兴趣领域（无明确完成日期）
+  #   Resources — 仅供参考的资料（不需完成任务）
+  #   Archive   — 已完成或不再关注的材料
+  # 最终路径示例：~/obsidian/工作/Projects/海思科差旅需求.md
+  # 留空则使用内置英文默认值；只需覆盖想自定义的项
+  categories:
+    projects:  "Projects"
+    areas:     "Areas"
+    resources: "Resources"
+    archive:   "Archive"
 
   naming:
     prefix_date: false           # 文件名加日期前缀
