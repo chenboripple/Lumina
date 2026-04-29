@@ -16,14 +16,17 @@ try:
     import chromadb
     from chromadb.config import Settings
     CHROMADB_AVAILABLE = True
-except ImportError:
+except Exception:
+    chromadb = None
+    Settings = None
     CHROMADB_AVAILABLE = False
 
 # 尝试导入 sentence-transformers
 try:
     from sentence_transformers import SentenceTransformer
     SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
+except Exception:
+    SentenceTransformer = None
     SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 
@@ -67,6 +70,19 @@ class EmbeddingProvider:
     
     def _init_local_model(self):
         """初始化本地模型"""
+        global SentenceTransformer, SENTENCE_TRANSFORMERS_AVAILABLE
+
+        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+            try:
+                from sentence_transformers import SentenceTransformer as _SentenceTransformer
+                SentenceTransformer = _SentenceTransformer
+                SENTENCE_TRANSFORMERS_AVAILABLE = True
+            except Exception as e:
+                raise ImportError(
+                    "sentence-transformers not available. "
+                    "Install with: pip install sentence-transformers"
+                ) from e
+
         if not SENTENCE_TRANSFORMERS_AVAILABLE:
             raise ImportError("sentence-transformers not installed. "
                             "Install with: pip install sentence-transformers")
@@ -157,28 +173,53 @@ class VectorStore:
         else:
             config = embedding_provider_config or {}
             self.embedding_provider = EmbeddingProvider(**config)
-        
-        # 初始化 ChromaDB
-        self._init_chromadb()
-        
+
         # 统计信息
         self.stats = {
             "total_documents": 0,
             "total_searches": 0,
             "avg_search_time": 0.0,
         }
+
+        # 初始化 ChromaDB
+        self._init_chromadb()
     
     def _init_chromadb(self):
         """初始化 ChromaDB"""
+        global chromadb, Settings, CHROMADB_AVAILABLE
+
+        if not CHROMADB_AVAILABLE:
+            try:
+                import chromadb as _chromadb
+                from chromadb.config import Settings as _Settings
+                chromadb = _chromadb
+                Settings = _Settings
+                CHROMADB_AVAILABLE = True
+            except Exception as e:
+                raise ImportError(
+                    "chromadb not available. Install with: pip install chromadb"
+                ) from e
+
         if not CHROMADB_AVAILABLE:
             raise ImportError("chromadb not installed. "
                             "Install with: pip install chromadb")
-        
-        # 创建持久化客户端
-        self.client = chromadb.Client(Settings(
-            chroma_db_impl="duckdb+parquet",
-            persist_directory=self.persist_directory
-        ))
+
+        os.makedirs(self.persist_directory, exist_ok=True)
+
+        # 兼容不同版本的 Chroma 客户端初始化方式
+        if hasattr(chromadb, "PersistentClient"):
+            self.client = chromadb.PersistentClient(path=self.persist_directory)
+        else:
+            # 旧版 Chroma 回退路径
+            try:
+                self.client = chromadb.Client(Settings(
+                    persist_directory=self.persist_directory
+                ))
+            except TypeError:
+                self.client = chromadb.Client(Settings(
+                    chroma_db_impl="duckdb+parquet",
+                    persist_directory=self.persist_directory
+                ))
         
         # 获取或创建集合
         self.collection = self.client.get_or_create_collection(

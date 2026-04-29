@@ -25,6 +25,7 @@ const views = {
 const navButtons = document.querySelectorAll('.nav-btn');
 const modal = document.getElementById('note-modal');
 const loadingOverlay = document.getElementById('loading-overlay');
+let scanPollTimer = null;
 
 // 初始化
 function init() {
@@ -158,7 +159,7 @@ async function loadDashboardData() {
             statusDisplay.innerHTML = `
                 <div class="status-active">
                     <span class="status-indicator"></span>
-                    正在处理: ${stats.status}
+                    status: ${stats.status}
                 </div>
             `;
         }
@@ -621,6 +622,11 @@ async function loadConfig() {
 
 // 快速操作
 async function scanDirectory() {
+    if (scanPollTimer) {
+        showToast('扫描任务正在进行中，请稍候…', 'warning');
+        return;
+    }
+
     // 检查是否已在扫描
     try {
         const status = await apiRequest('/api/scan/status');
@@ -630,29 +636,43 @@ async function scanDirectory() {
         }
     } catch (_) {}
 
-    showLoading(true);
     showToast('正在启动扫描...');
     try {
+        showLoading(true);
         await apiRequest('/api/scan', { method: 'POST', body: JSON.stringify({ incremental: true }) });
+        // 启动请求完成后立即解除全屏遮罩，后续用轮询+提示反馈进度，避免页面长期“转圈”
+        showLoading(false);
     } catch (error) {
         showToast('启动扫描失败: ' + (error.message || error), 'error');
         showLoading(false);
         return;
     }
 
-    // 轮询状态直到扫描结束
-    const pollInterval = setInterval(async () => {
+    const startedAt = Date.now();
+    const maxPollMs = 10 * 60 * 1000;
+
+    // 轮询状态直到扫描结束（或超时）
+    scanPollTimer = setInterval(async () => {
         try {
             const status = await apiRequest('/api/scan/status');
             if (!status.running) {
-                clearInterval(pollInterval);
+                clearInterval(scanPollTimer);
+                scanPollTimer = null;
                 showLoading(false);
                 showToast(status.message || '扫描完成');
                 await loadDashboardData();
                 await loadNotes();
+                return;
+            }
+
+            if (Date.now() - startedAt > maxPollMs) {
+                clearInterval(scanPollTimer);
+                scanPollTimer = null;
+                showToast('扫描仍在后台执行，请稍后点“刷新数据”查看结果', 'warning');
             }
         } catch (_) {
-            clearInterval(pollInterval);
+            clearInterval(scanPollTimer);
+            scanPollTimer = null;
             showLoading(false);
         }
     }, 2000);

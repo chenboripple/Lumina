@@ -4,6 +4,8 @@ CLI 命令行增强
 """
 
 import json
+import importlib.util
+import importlib.metadata
 import os
 import socket
 import signal
@@ -27,6 +29,92 @@ from lumina.web_interface import WebInterface
 SERVICE_DIR = Path.home() / ".lumina"
 SERVICE_PID_FILE = SERVICE_DIR / "service.pid"
 SERVICE_META_FILE = SERVICE_DIR / "service.json"
+
+
+RUNTIME_DEPENDENCIES_BASE = [
+    ("PyPDF2", "PyPDF2"),
+    ("pdfplumber", "pdfplumber"),
+    ("PyMuPDF", "fitz"),
+]
+
+RUNTIME_DEPENDENCIES_VECTOR = [
+    ("chromadb<0.5", "chromadb"),
+    ("sentence-transformers", "sentence_transformers"),
+]
+
+
+def _module_available(module_name: str) -> bool:
+    try:
+        return importlib.util.find_spec(module_name) is not None
+    except Exception:
+        return False
+
+
+def _is_chromadb_compatible() -> bool:
+    """当前项目使用旧版 Chroma 客户端配置，需 chromadb<0.5。"""
+    try:
+        version = importlib.metadata.version("chromadb")
+        parts = version.split(".")
+        major = int(parts[0]) if len(parts) > 0 else 0
+        minor = int(parts[1]) if len(parts) > 1 else 0
+        # 0.5+ 与 1.x API 均不兼容当前初始化方式
+        if major >= 1:
+            return False
+        if major == 0 and minor >= 5:
+            return False
+        return True
+    except Exception:
+        return False
+
+
+def _is_numpy_compatible_for_chromadb() -> bool:
+    """chromadb 0.4.x 在本项目路径下需要 numpy<2。"""
+    try:
+        version = importlib.metadata.version("numpy")
+        major = int(version.split(".")[0])
+        return major < 2
+    except Exception:
+        return False
+
+
+def _ensure_runtime_dependencies(enable_vector: bool = False) -> None:
+    """运行前检查关键依赖，缺失时自动安装。"""
+    deps = list(RUNTIME_DEPENDENCIES_BASE)
+    if enable_vector:
+        deps.extend(RUNTIME_DEPENDENCIES_VECTOR)
+
+    missing = [pkg for pkg, module in deps if not _module_available(module)]
+
+    # 版本兼容性检查：chromadb 必须 <0.5
+    if enable_vector and _module_available("chromadb") and not _is_chromadb_compatible():
+        missing.append("chromadb<0.5")
+
+    # 兼容性检查：chromadb 0.4.x 与 numpy 2.x 不兼容
+    if enable_vector and _module_available("chromadb") and not _is_numpy_compatible_for_chromadb():
+        missing.append("numpy<2")
+
+    if not missing:
+        return
+
+    # 去重并保持顺序
+    dedup_missing = list(dict.fromkeys(missing))
+    click.echo(f"📦 检测到缺失依赖，正在自动安装: {', '.join(dedup_missing)}")
+
+    cmd = [sys.executable, "-m", "pip", "install", *dedup_missing]
+    result = subprocess.run(cmd, check=False)
+    if result.returncode != 0:
+        raise click.ClickException(
+            "自动安装依赖失败，请手动执行: "
+            f"{sys.executable} -m pip install {' '.join(dedup_missing)}"
+        )
+
+    still_missing = [pkg for pkg, module in deps if not _module_available(module)]
+    if still_missing:
+        raise click.ClickException(
+            "依赖安装后仍不可用: " + ", ".join(still_missing)
+        )
+
+    click.echo("✅ 运行依赖检查通过")
 
 
 def _ensure_service_dir() -> None:
@@ -182,6 +270,7 @@ def start(config, host, port, watch, initial_sync, recursive, output, threshold,
     """后台启动 Lumina 常驻服务"""
 
     lumina_config = LuminaConfig.load(config)
+    _ensure_runtime_dependencies(enable_vector=vector)
     retention_raw = lumina_config.service.get("log_retention_days", 15) if isinstance(lumina_config.service, dict) else 15
     try:
         retention_days = max(0, int(retention_raw))
@@ -312,6 +401,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
     
     # 加载配置
     lumina_config = LuminaConfig.load(config)
+    _ensure_runtime_dependencies(enable_vector=vector)
     
     # 解析各 Agent 的 LLM 配置（JSON 格式）
     import json
@@ -416,6 +506,7 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
     """启动常驻服务：Web 界面 + 目录监听 + 自动整理"""
 
     lumina_config = LuminaConfig.load(config)
+    _ensure_runtime_dependencies(enable_vector=vector)
 
     if not lumina_config.input_sources:
         raise click.ClickException(
@@ -528,6 +619,7 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
 @click.option('--output', '-o', default=None, help='输出文件路径')
 def search(query, config, n, output):
     """语义搜索笔记"""
+    _ensure_runtime_dependencies(enable_vector=True)
     
     # 加载配置
     lumina_config = LuminaConfig.load(config)
@@ -575,6 +667,7 @@ def search(query, config, n, output):
 @click.option('--n', '-n', default=5, type=int, help='返回结果数量')
 def related(note_id, config, min_score, n):
     """查找关联笔记"""
+    _ensure_runtime_dependencies(enable_vector=True)
     
     # 加载配置
     lumina_config = LuminaConfig.load(config)
@@ -614,6 +707,7 @@ def related(note_id, config, min_score, n):
 @click.option('--min-similarity', '-s', default=0.7, type=float, help='最小相似度阈值')
 def graph(config, output, min_similarity):
     """构建知识图谱"""
+    _ensure_runtime_dependencies(enable_vector=True)
     
     # 加载配置
     lumina_config = LuminaConfig.load(config)
@@ -650,6 +744,7 @@ def graph(config, output, min_similarity):
 @click.option('--config', '-c', type=click.Path(), help='配置文件路径')
 def stats(config):
     """显示向量数据库统计信息"""
+    _ensure_runtime_dependencies(enable_vector=True)
     
     # 加载配置
     lumina_config = LuminaConfig.load(config)

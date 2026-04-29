@@ -131,6 +131,21 @@ class ContentFilter:
         if not duplicate_check.should_process:
             self.stats["filtered_duplicate"] += 1
             return duplicate_check
+
+        # 对 PDF 的降级提取文本（如扫描版提示）放宽低价值过滤，避免直接被跳过
+        if file_path.suffix.lower() == ".pdf":
+            pdf_marker = (
+                content.startswith("[PDF appears to be scanned/image-based")
+                or content.startswith("[PDF:")
+            )
+            if pdf_marker:
+                self.stats["passed"] += 1
+                return FilterResult(
+                    should_process=True,
+                    reason="PDF 降级提取内容，保留进入后续流程",
+                    confidence=0.55,
+                    metadata={"filter_type": "pdf_limited_text"}
+                )
         
         # 4. 内容价值评估
         value_check = self._assess_value(content)

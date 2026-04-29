@@ -95,6 +95,41 @@ class PDFExtractor(BaseExtractor):
     
     def can_extract(self, file_path: Path) -> bool:
         return file_path.suffix.lower() in self.SUPPORTED_FORMATS
+
+    def _extract_with_pdfplumber(self, file_path: Path) -> str:
+        """使用 pdfplumber 作为兜底提取器。"""
+        try:
+            import pdfplumber
+
+            text_parts = []
+            with pdfplumber.open(str(file_path)) as pdf:
+                for i, page in enumerate(pdf.pages):
+                    page_text = page.extract_text() or ""
+                    if page_text.strip():
+                        text_parts.append(f"\n--- Page {i+1} ---\n{page_text}")
+
+            return "\n".join(text_parts).strip()
+        except Exception:
+            return ""
+
+    def _extract_with_pymupdf(self, file_path: Path) -> str:
+        """使用 PyMuPDF(fitz) 作为兜底提取器。"""
+        try:
+            import fitz
+
+            text_parts = []
+            doc = fitz.open(str(file_path))
+            try:
+                for i, page in enumerate(doc):
+                    page_text = page.get_text("text") or ""
+                    if page_text.strip():
+                        text_parts.append(f"\n--- Page {i+1} ---\n{page_text}")
+            finally:
+                doc.close()
+
+            return "\n".join(text_parts).strip()
+        except Exception:
+            return ""
     
     def extract(self, file_path: Path) -> ExtractedContent:
         """提取 PDF 中的文字内容"""
@@ -122,8 +157,24 @@ class PDFExtractor(BaseExtractor):
                     page_text = page.extract_text()
                     if page_text:
                         text_parts.append(f"\n--- Page {i+1} ---\n{page_text}")
-            
-            full_text = "\n".join(text_parts)
+
+            full_text = "\n".join(text_parts).strip()
+
+            # PyPDF2 文本过少时，尝试多引擎兜底（pdfplumber / PyMuPDF）
+            if len(full_text) < 100:
+                fallback_text = self._extract_with_pdfplumber(file_path)
+                fitz_text = self._extract_with_pymupdf(file_path)
+
+                candidates = [
+                    ("pypdf2", full_text),
+                    ("pdfplumber_fallback", fallback_text),
+                    ("pymupdf_fallback", fitz_text),
+                ]
+                best_extractor, best_text = max(candidates, key=lambda item: len(item[1]))
+                full_text = best_text
+                metadata["extractor"] = best_extractor
+            else:
+                metadata["extractor"] = "pypdf2"
             
             # 如果文字很少，可能是扫描版 PDF，提示需要 OCR
             if len(full_text.strip()) < 100:
@@ -144,6 +195,29 @@ class PDFExtractor(BaseExtractor):
                 confidence=0.0
             )
         except Exception as e:
+            # PyPDF2 出错时再尝试 pdfplumber / PyMuPDF
+            fallback_text = self._extract_with_pdfplumber(file_path)
+            fitz_text = self._extract_with_pymupdf(file_path)
+
+            best_extractor = ""
+            best_text = ""
+            if len(fallback_text) >= len(fitz_text):
+                best_extractor, best_text = "pdfplumber_fallback", fallback_text
+            else:
+                best_extractor, best_text = "pymupdf_fallback", fitz_text
+
+            if best_text:
+                return ExtractedContent(
+                    text=best_text,
+                    metadata={
+                        "size_bytes": file_path.stat().st_size,
+                        "extractor": best_extractor,
+                        "pypdf2_error": str(e),
+                    },
+                    content_type="pdf",
+                    confidence=0.75 if len(best_text) > 500 else 0.55
+                )
+
             return ExtractedContent(
                 text=f"[PDF: {file_path.name} - Error: {str(e)}]",
                 metadata={"error": str(e)},

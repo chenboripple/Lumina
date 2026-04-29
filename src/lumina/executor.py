@@ -306,12 +306,16 @@ class Executor:
             # 使用多模态提取器
             extractor = MultimodalExtractor()
             extracted = extractor.extract(path)
-            
-            if extracted.confidence > 0:
-                # 提取成功，返回提取的内容
+
+            # 对二进制/多模态类型，始终使用提取器结果，避免回退到 UTF-8 文本读取导致解码错误
+            if extracted.content_type in {"pdf", "image", "audio", "video", "code", "unknown"}:
                 return [extracted.text]
-            
-            # 如果提取器无法处理，回退到基本文本读取
+
+            if extracted.confidence > 0:
+                # 文本提取成功，返回提取的内容
+                return [extracted.text]
+
+            # 仅在可判定为普通文本文件时回退到基础文本读取
             return self._read_text_file(path)
             
         except Exception as e:
