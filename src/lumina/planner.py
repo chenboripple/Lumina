@@ -537,6 +537,7 @@ class Planner:
             "code_explanation": "areas",
             "diary":            "areas",
             "book_notes":       "resources",
+            "knowledge_essay":  "resources",
             "generic_notes":    "resources",
         }
         para_key = scene_to_para.get(scene, "resources")
