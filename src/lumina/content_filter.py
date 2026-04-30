@@ -66,6 +66,13 @@ class ContentFilter:
     REFERENCE_FILENAME_HINTS = [
         "list", "列表", "字典", "dictionary", "编码", "code", "id", "编号", "dataset", "数据集",
         "清单", "mapping", "名单", "全量", "原始", "详情", "record", "records",
+        "invoice", "发票", "roster", "花名册", "城市", "city", "relation", "关系", "对应",
+    ]
+
+    OBJECTIVE_LIST_KEYWORDS = [
+        "invoice", "发票", "mapping", "对应关系", "customer mapping", "customer_map", "roster",
+        "花名册", "城市清单", "city list", "名单", "清单", "dictionary", "字典", "电子发票",
+        "人员清单", "客户对应", "code list", "id list",
     ]
 
     SQL_HINTS = ["select", "from", "join", "where", "insert", "update", "delete", "create table", "left join"]
@@ -174,20 +181,21 @@ class ContentFilter:
             self.stats["filtered_duplicate"] += 1
             return duplicate_check
 
-        # 对 PDF 的降级提取文本（如扫描版提示）放宽低价值过滤，避免直接被跳过
+        # 几乎不可读的 PDF 不应继续生成笔记
         if file_path.suffix.lower() == ".pdf":
             pdf_marker = (
                 content.startswith("[PDF appears to be scanned/image-based")
                 or content.startswith("[PDF:")
             )
             if pdf_marker:
-                self.stats["passed"] += 1
-                return FilterResult(
-                    should_process=True,
-                    reason="PDF 降级提取内容，保留进入后续流程",
-                    confidence=0.55,
-                    metadata={"filter_type": "pdf_limited_text"}
-                )
+                visible_text = re.sub(r'^\[[^\]]+\]\s*', '', content, count=1).strip()
+                if len(visible_text) < 120 or self._looks_like_garbled_text(visible_text):
+                    return FilterResult(
+                        should_process=False,
+                        reason="PDF 可提取文本过少或疑似乱码，跳过生成",
+                        confidence=0.92,
+                        metadata={"filter_type": "unreadable_pdf"}
+                    )
         
         # 4. 内容价值评估
         value_check = self._assess_value(content, file_path)
@@ -338,6 +346,18 @@ class ContentFilter:
             "filter_type": "value_assessment"
         }
 
+        if self._looks_like_garbled_text(content):
+            return FilterResult(
+                should_process=False,
+                reason="文本疑似乱码或提取噪声，缺少可读信息",
+                confidence=0.88,
+                metadata={
+                    **metadata,
+                    "filter_type": "garbled_text",
+                    "garbled_text": True,
+                }
+            )
+
         density_profile = self._profile_knowledge_density(content, file_path)
         metadata.update(density_profile)
 
@@ -398,6 +418,11 @@ class ContentFilter:
         abstraction_hits = sum(1 for kw in self.ABSTRACTION_KEYWORDS if kw.lower() in lower_text)
         raw_fact_hits = sum(1 for kw in self.RAW_FACT_KEYWORDS if kw.lower() in lower_text)
         sql_lines = sum(1 for line in nonempty_lines if any(hint in line.lower() for hint in self.SQL_HINTS))
+        sql_operation_lines = sum(
+            1
+            for line in nonempty_lines
+            if re.search(r'\b(update|insert\s+into|delete\s+from|alter\s+table|create\s+table|drop\s+table)\b', line.lower())
+        )
         table_lines = sum(1 for line in nonempty_lines if line.count("|") >= 2)
         fact_lines = sum(1 for line in nonempty_lines if self._is_sample_fact_line(line))
         numeric_chars = sum(ch.isdigit() for ch in text)
@@ -407,12 +432,16 @@ class ContentFilter:
 
         filename = (file_path.name.lower() if file_path else "")
         reference_name_hits = sum(1 for hint in self.REFERENCE_FILENAME_HINTS if hint.lower() in filename)
+        objective_list_hits = sum(1 for hint in self.OBJECTIVE_LIST_KEYWORDS if hint.lower() in f"{filename} {lower_text}")
 
         fact_line_ratio = fact_lines / total_lines
         table_line_ratio = table_lines / total_lines
+        sql_operation_ratio = sql_operation_lines / total_lines
 
         looks_like_reference_list = (
-            reference_name_hits > 0 and abstraction_hits == 0 and (numeric_ratio > self.HIGH_NUMERIC_RATIO or table_line_ratio > 0.2)
+            (reference_name_hits > 0 or objective_list_hits > 0)
+            and abstraction_hits == 0
+            and (numeric_ratio > self.HIGH_NUMERIC_RATIO or table_line_ratio > 0.2 or fact_line_ratio > 0.35)
         )
         looks_like_single_record = (
             fact_line_ratio > self.LOW_KNOWLEDGE_DENSITY_RATIO
@@ -420,8 +449,13 @@ class ContentFilter:
             and abstraction_hits < 2
             and sql_lines == 0
         )
+        looks_like_sql_log = (
+            sql_operation_ratio > 0.35
+            and abstraction_hits < 2
+            and raw_fact_hits < 4
+        )
 
-        low_knowledge_density = bool(looks_like_reference_list or looks_like_single_record)
+        low_knowledge_density = bool(looks_like_reference_list or looks_like_single_record or looks_like_sql_log)
         downgrade_sample_facts = bool(
             not low_knowledge_density
             and (
@@ -436,23 +470,62 @@ class ContentFilter:
             reason = "内容更像原始列表/字典/编码映射，缺少可复用规则与结论"
         elif looks_like_single_record:
             reason = "内容以样本事实和客观字段为主，知识密度过低"
+        elif looks_like_sql_log:
+            reason = "内容主要是 SQL 操作留痕，缺少规则解释或可复用结论"
 
         return {
             "abstraction_hits": abstraction_hits,
             "raw_fact_hits": raw_fact_hits,
             "sql_lines": sql_lines,
+            "sql_operation_lines": sql_operation_lines,
             "fact_lines": fact_lines,
             "fact_line_ratio": round(fact_line_ratio, 3),
             "table_line_ratio": round(table_line_ratio, 3),
+            "sql_operation_ratio": round(sql_operation_ratio, 3),
             "numeric_ratio": round(numeric_ratio, 3),
             "sensitive_hits": sensitive_hits,
             "reference_name_hits": reference_name_hits,
+            "objective_list_hits": objective_list_hits,
             "low_knowledge_density": low_knowledge_density,
             "downgrade_sample_facts": downgrade_sample_facts,
             "mask_sensitive": sensitive_hits > 0 or raw_fact_hits > 0,
             "reason": reason,
             "confidence": 0.85 if low_knowledge_density else 0.68,
         }
+
+    def _looks_like_garbled_text(self, content: str) -> bool:
+        text = (content or "").strip()
+        if not text:
+            return False
+
+        visible_chars = len(re.findall(r'\S', text))
+        if visible_chars == 0:
+            return False
+
+        replacement_chars = text.count("\ufffd") + text.count("�")
+        readable_chars = len(re.findall(r'[\u4e00-\u9fffA-Za-z0-9]', text))
+        symbol_chars = len(re.findall(r'[^\u4e00-\u9fffA-Za-z0-9\s]', text))
+
+        replacement_ratio = replacement_chars / visible_chars
+        readable_ratio = readable_chars / visible_chars
+        symbol_ratio = symbol_chars / visible_chars
+
+        if replacement_ratio > 0.05:
+            return True
+        if symbol_ratio > 0.55 and readable_ratio < 0.2:
+            return True
+
+        garbled_lines = 0
+        nonempty_lines = [line.strip() for line in text.splitlines() if line.strip()]
+        for line in nonempty_lines[:20]:
+            line_visible = len(re.findall(r'\S', line))
+            if line_visible < 8:
+                continue
+            line_readable = len(re.findall(r'[\u4e00-\u9fffA-Za-z0-9]', line))
+            if line_readable / max(line_visible, 1) < 0.2:
+                garbled_lines += 1
+
+        return garbled_lines >= 3 and garbled_lines >= max(2, len(nonempty_lines) // 3)
 
     def _is_sample_fact_line(self, line: str) -> bool:
         stripped = line.strip()

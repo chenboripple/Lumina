@@ -350,6 +350,10 @@ class Planner:
             self.stats["files_in_clusters"] = sum(len(c.files) for c in clusters)
         else:
             individual_files = files
+
+        overview_file = self._build_global_overview_cluster(files)
+        if overview_file:
+            clustered_files.insert(0, overview_file)
         
         # 合并所有待处理文件
         all_files = clustered_files + individual_files
@@ -386,6 +390,75 @@ class Planner:
             batches=batches,
             summary=summary
         )
+
+    def _build_global_overview_cluster(self, files: List[FileInfo]) -> Optional[FileInfo]:
+        """为一批文件生成全局知识地图任务。"""
+        if len(files) < 8:
+            return None
+
+        representative_files = sorted(files, key=lambda item: item.estimated_cost, reverse=True)[:16]
+        catalog = self._build_overview_catalog(files)
+        anchor = representative_files[0]
+        return FileInfo(
+            path=anchor.path,
+            type="cluster",
+            size=sum(item.size for item in representative_files),
+            modified=max(item.modified for item in representative_files),
+            hash=hashlib.md5("|".join(sorted(item.hash for item in representative_files)).encode("utf-8")).hexdigest(),
+            metadata={
+                "filename": "global_overview.cluster",
+                "extension": ".cluster",
+                "is_cluster": True,
+                "cluster_id": "global_overview",
+                "cluster_files": [str(item.path) for item in representative_files],
+                "cluster_strategy": ClusterStrategy.SUMMARIZE_MULTIPLE.value,
+                "cluster_title": "全局知识地图",
+                "cluster_description": "Global overview of the current batch",
+                "overview_scope": "global",
+                "overview_catalog": catalog,
+                "title_hint": "全局知识地图",
+                "para": "resources",
+            },
+            processing_priority=0,
+            estimated_cost=sum(item.estimated_cost for item in representative_files),
+            estimated_time=sum(item.estimated_time for item in representative_files),
+            required_capabilities=[],
+        )
+
+    def _build_overview_catalog(self, files: List[FileInfo]) -> str:
+        type_counts: Dict[str, int] = {}
+        para_counts: Dict[str, int] = {}
+        domain_counts: Dict[str, int] = {}
+        directory_counts: Dict[str, int] = {}
+
+        for file_info in files:
+            type_counts[file_info.type] = type_counts.get(file_info.type, 0) + 1
+            para = self._infer_para(file_info)
+            para_counts[para] = para_counts.get(para, 0) + 1
+            domain = self._infer_domain(file_info)
+            domain_counts[domain] = domain_counts.get(domain, 0) + 1
+            parent = file_info.path.parent.name or "/"
+            directory_counts[parent] = directory_counts.get(parent, 0) + 1
+
+        top_dirs = sorted(directory_counts.items(), key=lambda item: item[1], reverse=True)[:8]
+        return (
+            f"Domain counts: {domain_counts}\n"
+            f"PARA counts: {para_counts}\n"
+            f"Type counts: {type_counts}\n"
+            f"Top directories: {top_dirs}"
+        )
+
+    def _infer_domain(self, file_info: FileInfo) -> str:
+        text = str(file_info.path).lower()
+        if re.search(r"论文|paper|study|学习|课程|book|reading", text):
+            return "学习"
+        if re.search(r"chat|聊天|邮件|mail|wecom|微信|qq", text):
+            return "沟通"
+        if re.search(r"travel|旅行|家庭|购物|health|健康|movie|music|diary|journal", text):
+            return "生活兴趣"
+        if re.search(r"project|项目|需求|prd|design|meeting|sql|ops|deploy|code|repo|service", text):
+            return "工作"
+        return "参考资料"
     
     def _create_batches(self, files: List[FileInfo]) -> List[List[FileInfo]]:
         """创建处理批次"""

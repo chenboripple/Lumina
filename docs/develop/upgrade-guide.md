@@ -140,8 +140,8 @@ Lumina/
 ### 4. 扩展 CLI
 修改 `src/lumina/cli.py`：
 - 添加 `--incremental` 参数
-- 添加 `cache-stats` 命令
-- 添加 `history` 命令
+- 增加 `start` / `serve` / `process` 的服务化运行参数
+- 增加 `search` / `related` / `graph` / `stats` 等向量相关命令
 
 ### 5. 编写测试
 为所有新模块编写单元测试：
@@ -170,31 +170,32 @@ Lumina/
 
 ### 场景1：日常增量更新
 ```bash
-# 每天增量更新笔记库
-lumina scan ~/Documents --incremental --output ~/Obsidian/Vault
+# 每天按配置输入源做一次增量处理
+lumina process
 
-# 查看处理统计
-lumina cache-stats
+# 只处理某个目录
+lumina process ~/Documents --incremental --output ~/Obsidian/Vault
 
-# 查看历史趋势
-lumina history --trend ~/Documents/important.md
+# 如果希望常驻监听目录变化
+lumina start
 ```
 
 ### 场景2：批量处理新文件
 ```python
-from lumina import LuminaAgent
+from lumina.harness import Harness, HarnessConfig
 
-agent = LuminaAgent()
+config = HarnessConfig(
+    incremental=True,
+    output_dir="./output",
+)
+agent = Harness(config)
 
-# 扫描新文件
-plan = agent.scan("~/Downloads", incremental=True)
-print(plan.get_summary())
-
-# 执行处理
-results = agent.execute(plan)
+# 处理新文件
+report = agent.run("~/Downloads")
+print(report["statistics"]["processed_files"])
 
 # 查看质量报告
-print(results.quality_report)
+print(report["statistics"]["avg_score"])
 ```
 
 ### 场景3：质量监控

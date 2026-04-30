@@ -206,6 +206,8 @@ function renderScanStatus(status) {
     const container = document.getElementById('status-display');
     if (!container) return;
 
+    const phase = status.phase || (status.running ? 'running' : 'idle');
+    const lastStatus = status.last_status || phase;
     const sourceCounts = status.source_counts || {};
     const fileCounts = status.file_counts || {};
     const queue = Array.isArray(status.queue) ? status.queue : [];
@@ -213,13 +215,57 @@ function renderScanStatus(status) {
     const currentSource = status.current_source || '';
     const running = Boolean(status.running);
     const message = status.message || (running ? '扫描中...' : '等待处理...');
+    const lastCompletedAt = status.last_completed_at || status.last_event_at || '';
     const etaSeconds = status.eta_seconds;
     const elapsedSeconds = Number(status.elapsed_seconds || 0);
     const ratePerMinute = Number(status.rate_per_minute || 0);
     const failedItems = Array.isArray(status.failed_items) ? status.failed_items : [];
 
     if (!running && queue.length === 0) {
-        container.innerHTML = '<p class="status-idle">等待处理...</p>';
+        if (lastStatus === 'completed' || lastStatus === 'failed') {
+            const badgeClass = lastStatus === 'failed' ? 'failed' : 'completed';
+            const badgeText = lastStatus === 'failed' ? '上次运行有失败' : '最近一次已完成';
+            container.innerHTML = `
+                <div class="queue-summary queue-summary-static ${badgeClass}">
+                    <div class="queue-summary-top">
+                        <div class="status-active stopped ${badgeClass}">
+                            <span class="status-indicator"></span>
+                            ${badgeText}
+                        </div>
+                        <div class="queue-message">${escapeHtml(message || '可再次开始扫描')}</div>
+                    </div>
+                    <div class="queue-counters secondary">
+                        <span>成功 ${fileCounts.processed || 0}</span>
+                        <span>失败 ${fileCounts.failed || 0}</span>
+                        <span>跳过 ${fileCounts.skipped || 0}</span>
+                        <span>总计 ${fileCounts.completed || fileCounts.total || 0}</span>
+                    </div>
+                    ${lastCompletedAt ? `<div class="queue-last-run">最近更新时间 ${escapeHtml(formatDateTime(lastCompletedAt))}</div>` : ''}
+                    ${failedItems.length ? `
+                        <div class="queue-failure-actions">
+                            <button class="btn btn-secondary btn-sm" id="btn-view-failures">查看失败详情 (${failedItems.length})</button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+            const failureBtn = document.getElementById('btn-view-failures');
+            if (failureBtn) {
+                failureBtn.addEventListener('click', openFailureModal);
+            }
+            return;
+        }
+
+        container.innerHTML = `
+            <div class="queue-summary queue-summary-static idle">
+                <div class="queue-summary-top">
+                    <div class="status-active stopped idle">
+                        <span class="status-indicator"></span>
+                        尚未开始
+                    </div>
+                    <div class="queue-message">${escapeHtml(message || '点击开始扫描后，这里会显示实时进度和最近一次运行结果。')}</div>
+                </div>
+            </div>
+        `;
         return;
     }
 

@@ -1268,13 +1268,42 @@ class Harness:
             for idx, src in enumerate(cluster_files[:10]):
                 text = file_contents.get(src, "")
                 source_blocks.append(f"## Source {idx + 1}: {Path(src).name}\n{text[:1800]}")
-            prompt = (
-                "You are a knowledge synthesis expert. Summarize the related documents into one high-quality note.\n"
-                "Return JSON with fields: title, summary, key_points, tags, suggested_links, metadata.\n\n"
-                f"Cluster title: {cluster_title}\n"
-                f"Source count: {len(cluster_files)}\n\n"
-                + "\n\n".join(source_blocks)
-            )
+            overview_scope = str(file_info.metadata.get("overview_scope", "")).strip().lower()
+            overview_catalog = str(file_info.metadata.get("overview_catalog", "")).strip()
+            title_hint = str(file_info.metadata.get("title_hint", cluster_title)).strip() or cluster_title
+            if overview_scope == "global":
+                prompt = (
+                    "You are a knowledge architect. Build one high-value portfolio overview note from the batch.\n"
+                    "Group the materials into a small hierarchy such as work, learning, life, communication or other appropriate domains.\n"
+                    "Identify which materials deserve standalone notes, which should be merged, which belong to tasks or follow-up, and which are low-value raw data.\n"
+                    "Generate a precise note title, not a raw filename.\n"
+                    "Return JSON with fields: title, summary, key_points, tags, suggested_links, metadata.\n\n"
+                    f"Title hint: {title_hint}\n"
+                    f"File catalog:\n{overview_catalog}\n\n"
+                    + "\n\n".join(source_blocks)
+                )
+            elif overview_scope == "project":
+                prompt = (
+                    "You are a technical program analyst. Summarize the project directory into one concise project overview note.\n"
+                    "Focus on architecture, purpose, major modules, workflows, operational concerns, and learning value.\n"
+                    "Do not produce a file-by-file inventory. Merge related files into a few themes.\n"
+                    "Generate a clear topical title, such as 项目总览, 组件说明, or 操作手册.\n"
+                    "Return JSON with fields: title, summary, key_points, tags, suggested_links, metadata.\n\n"
+                    f"Title hint: {title_hint}\n"
+                    f"Directory: {file_info.metadata.get('directory', '')}\n"
+                    f"Source count: {len(cluster_files)}\n\n"
+                    + "\n\n".join(source_blocks)
+                )
+            else:
+                prompt = (
+                    "You are a knowledge synthesis expert. Summarize the related documents into one high-quality note.\n"
+                    "Generate a precise topical title and never use raw directory names like Collection, Append to, cluster, or date-only folder names.\n"
+                    "Return JSON with fields: title, summary, key_points, tags, suggested_links, metadata.\n\n"
+                    f"Title hint: {title_hint}\n"
+                    f"Cluster title: {cluster_title}\n"
+                    f"Source count: {len(cluster_files)}\n\n"
+                    + "\n\n".join(source_blocks)
+                )
             raw = self.executor._call_llm(prompt, context)
             note = self.executor._parse_output(raw, file_info, context)
             note.metadata.update({
@@ -1282,6 +1311,7 @@ class Harness:
                 "cluster_files": cluster_files,
                 "cluster_strategy": cluster_strategy,
                 "cluster_id": cluster.cluster_id,
+                "overview_scope": overview_scope,
             })
             note.links = list(set(note.links + [Path(src).name for src in cluster_files]))
             note.content = note.content.rstrip() + "\n\n## Source Files\n" + "\n".join([f"- {src}" for src in cluster_files]) + "\n"

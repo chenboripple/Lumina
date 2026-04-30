@@ -6,6 +6,7 @@ Executor - 智能执行模块 (Agent 增强版)
 import os
 import json
 import hashlib
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Iterator
 from dataclasses import dataclass, field
@@ -497,7 +498,7 @@ class Executor:
                 content = self._to_markdown(data)
             
             return NoteOutput(
-                title=data.get("title", file_info.path.stem),
+                title=self._resolve_note_title(data.get("title", file_info.path.stem), file_info, data),
                 content=content,
                 tags=data.get("tags", []),
                 links=data.get("suggested_links", []),
@@ -519,7 +520,7 @@ class Executor:
                 level="warning"
             )
             return NoteOutput(
-                title=file_info.path.stem,
+                title=self._resolve_note_title(file_info.path.stem, file_info),
                 content=raw_output,
                 tags=["parse_error"],
                 links=[],
@@ -562,7 +563,7 @@ class Executor:
 ## Output Format
 Return JSON with this structure:
 {{
-    "title": "Concise, descriptive title",
+    "title": "Clear topical title. Do not copy raw filenames, date folders, Collection, Append to, or generic placeholders.",
     "summary": "Brief overview of the content",
     "key_points": ["point 1", "point 2", "point 3"],
     "tags": ["tag1", "tag2", "tag3"],
@@ -607,7 +608,7 @@ Return JSON with this structure:
 ## Output Format
 Return JSON with this structure:
 {{
-    "title": "Comprehensive title reflecting full content",
+    "title": "Clear topical title reflecting the document theme. Never reuse raw filenames or generic folder labels.",
     "summary": "Detailed overview covering all parts",
     "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"],
     "tags": ["tag1", "tag2", "tag3", "tag4"],
@@ -706,7 +707,7 @@ Return JSON with this structure:
             content = self._to_markdown(data)
             
             return NoteOutput(
-                title=data.get("title", file_info.path.stem),
+                title=self._resolve_note_title(data.get("title", file_info.path.stem), file_info, data),
                 content=content,
                 tags=data.get("tags", []),
                 links=data.get("suggested_links", []),
@@ -725,7 +726,7 @@ Return JSON with this structure:
                 level="warning"
             )
             return NoteOutput(
-                title=file_info.path.stem,
+                title=self._resolve_note_title(file_info.path.stem, file_info),
                 content=raw_output,
                 tags=["parse_error"],
                 links=[],
@@ -752,7 +753,11 @@ Return JSON with this structure:
             },
         )
         note.content = masked_content
-        note.title = self.content_filter.mask_sensitive_text(note.title)
+        note.title = self._resolve_note_title(
+            self.content_filter.mask_sensitive_text(note.title),
+            None,
+            {"metadata": note.metadata},
+        )
         note.tags = [self.content_filter.mask_sensitive_text(tag) for tag in note.tags]
         note.links = [self.content_filter.mask_sensitive_text(link) for link in note.links]
         note.metadata = {
@@ -764,6 +769,82 @@ Return JSON with this structure:
             },
         }
         return note
+
+    def _resolve_note_title(self, candidate: str, file_info=None, parsed_data: Optional[Dict[str, Any]] = None) -> str:
+        """规范化标题，避免落回文件名、目录名或占位词。"""
+        parsed_data = parsed_data or {}
+        metadata = dict(getattr(file_info, "metadata", {}) or {})
+        extra_metadata = parsed_data.get("metadata", {}) if isinstance(parsed_data.get("metadata", {}), dict) else {}
+        metadata.update(extra_metadata)
+
+        title = re.sub(r'[_\-]+', ' ', str(candidate or '').strip())
+        title = re.sub(r'\s+', ' ', title).strip(" :._-")
+        preferred = str(metadata.get("title_hint") or metadata.get("cluster_title") or "").strip()
+
+        if metadata.get("overview_scope") == "global":
+            preferred = preferred or "全局知识地图"
+        elif metadata.get("overview_scope") == "project":
+            preferred = preferred or "项目总览"
+
+        if self._is_generic_title(title, file_info):
+            if preferred:
+                return preferred
+            derived = self._derive_title_from_data(parsed_data, metadata)
+            if derived:
+                return derived
+
+        if preferred and title.lower().startswith(("collection", "append to", "cluster", "untitled")):
+            return preferred
+
+        return title or preferred or "主题笔记"
+
+    def _is_generic_title(self, title: str, file_info=None) -> bool:
+        normalized = str(title or "").strip().lower()
+        if not normalized:
+            return True
+        if normalized.startswith(("collection", "append to", "cluster", "untitled", "summary")):
+            return True
+        if re.fullmatch(r'\d{4}([_-]?\d{2})?', normalized):
+            return True
+        if len(normalized) < 4:
+            return True
+        if file_info is not None:
+            file_stem = re.sub(r'[_\-]+', ' ', file_info.path.stem.lower()).strip()
+            if normalized == file_stem:
+                return True
+        return False
+
+    def _derive_title_from_data(self, parsed_data: Dict[str, Any], metadata: Dict[str, Any]) -> str:
+        scene = str(metadata.get("scene", "")).strip().lower()
+        candidates: List[str] = []
+        for key in ["summary", "abstract", "overview", "background", "research_problem", "context", "scope", "system"]:
+            value = parsed_data.get(key)
+            if isinstance(value, str) and value.strip():
+                candidates.append(value.strip())
+        for key in ["key_points", "findings", "goals", "design_goals"]:
+            value = parsed_data.get(key)
+            if isinstance(value, list) and value:
+                first = str(value[0]).strip()
+                if first:
+                    candidates.append(first)
+
+        for raw in candidates:
+            topic = re.split(r'[。；;:：\n,.，]', raw, maxsplit=1)[0].strip()
+            topic = re.sub(r'^(本文|该文档|这个文档|本说明|该项目|主要|用于|关于)', '', topic).strip()
+            topic = re.sub(r'\s+', ' ', topic)
+            if len(topic) < 4:
+                continue
+            if scene in {"ops_doc", "technical_doc"} and not re.search(r'手册|指南|说明|规范|总览', topic):
+                return f"{topic}操作手册"
+            if scene in {"requirements", "prd", "design_doc"} and not re.search(r'需求|设计|方案|说明', topic):
+                return f"{topic}设计说明"
+            if scene in {"meeting_notes", "chat_log", "email"} and not re.search(r'纪要|沟通|讨论', topic):
+                return f"{topic}沟通纪要"
+            if re.search(r'数据|字段|表|sql|映射|订单', topic, re.IGNORECASE) and not re.search(r'解析|说明|总结', topic):
+                return f"{topic}数据解析"
+            return topic
+
+        return str(metadata.get("title_hint") or metadata.get("cluster_title") or "").strip()
     
     def _extract_json(self, text: str) -> str:
         """从文本中提取 JSON"""

@@ -380,12 +380,15 @@ class VectorStore:
             相似文档列表
         """
         # 获取参考文档
-        doc = self.collection.get(ids=[document_id])
+        doc = self.collection.get(ids=[document_id], include=["embeddings"])
         if not doc["ids"]:
             raise ValueError(f"Document not found: {document_id}")
         
         # 使用参考文档的嵌入向量搜索
-        reference_embedding = doc["embeddings"][0]
+        embeddings = doc.get("embeddings")
+        if not embeddings:
+            raise ValueError(f"Embedding not found for document: {document_id}")
+        reference_embedding = embeddings[0]
         
         results = self.collection.query(
             query_embeddings=[reference_embedding],

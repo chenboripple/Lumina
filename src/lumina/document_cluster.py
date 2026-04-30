@@ -54,6 +54,7 @@ class DocumentClusterer:
     
     # 短文档阈值
     SHORT_DOC_THRESHOLD = 10 * 1024  # 10KB
+    PROJECT_SUMMARY_MIN_FILES = 6
     
     # 每个簇最多包含的文档数
     MAX_FILES_PER_CLUSTER = 10
@@ -83,17 +84,20 @@ class DocumentClusterer:
         """
         self.stats["total_files"] = len(files)
         
-        # 1. 分离短文档和长文档
-        short_docs, long_docs = self._split_by_size(files)
+        # 1. 优先识别项目型目录，避免项目文件逐个出笔记
+        project_clusters, remaining_files = self._cluster_project_directories(files)
+
+        # 2. 分离短文档和长文档
+        short_docs, long_docs = self._split_by_size(remaining_files)
         
-        # 2. 对短文档按目录聚类
-        clusters = self._cluster_by_directory(short_docs)
+        # 3. 对短文档按目录聚类
+        clusters = project_clusters + self._cluster_by_directory(short_docs)
 
         # 未被聚类的短文档需要保留独立处理
         clustered_short = {p for c in clusters for p in c.files}
         remaining_short_docs = [p for p in short_docs if p not in clustered_short]
 
-        # 3. 检查是否有可以追加到已有笔记的文档
+        # 4. 检查是否有可以追加到已有笔记的文档
         append_clusters: List[DocumentCluster] = []
         append_candidates = long_docs + remaining_short_docs
         if existing_notes:
@@ -103,10 +107,60 @@ class DocumentClusterer:
 
         clusters.extend(append_clusters)
 
-        # 4. 剩余文件独立处理
+        # 5. 剩余文件独立处理
         self.stats["individual_files"] = len(remaining_files)
 
         return clusters, remaining_files
+
+    def _cluster_project_directories(self, files: List[Path]) -> Tuple[List[DocumentCluster], List[Path]]:
+        """将项目型目录聚合为项目总览。"""
+        dir_groups = defaultdict(list)
+        for file in files:
+            for parent in list(file.parents)[:4]:
+                dir_groups[str(parent)].append(file)
+
+        candidates = []
+        for dir_path, grouped_files in dir_groups.items():
+            directory = Path(dir_path)
+            unique_files = sorted(set(grouped_files))
+            if len(unique_files) < self.PROJECT_SUMMARY_MIN_FILES:
+                continue
+            if self._looks_like_project_directory(directory, unique_files):
+                candidates.append((directory, unique_files))
+
+        selected = []
+        covered_files = set()
+        for directory, grouped_files in sorted(candidates, key=lambda item: (len(item[0].parts), len(item[1])), reverse=True):
+            file_set = set(grouped_files)
+            if file_set & covered_files:
+                continue
+            selected.append((directory, grouped_files))
+            covered_files.update(file_set)
+
+        clusters = []
+        for directory, grouped_files in selected:
+            cluster_id = hashlib.md5(str(directory).encode()).hexdigest()[:8]
+            title = self._build_project_summary_title(directory)
+            clusters.append(
+                DocumentCluster(
+                    cluster_id=f"project_{cluster_id}",
+                    files=grouped_files,
+                    strategy=ClusterStrategy.SUMMARIZE_MULTIPLE,
+                    title=title,
+                    description=f"Project overview for {directory.name}",
+                    metadata={
+                        "directory": str(directory),
+                        "file_count": len(grouped_files),
+                        "overview_scope": "project",
+                        "title_hint": title,
+                    },
+                )
+            )
+            self.stats["created_clusters"] += 1
+            self.stats["combined_files"] += len(grouped_files)
+
+        remaining = [file for file in files if file not in covered_files]
+        return clusters, remaining
     
     def _split_by_size(self, files: List[Path]) -> Tuple[List[Path], List[Path]]:
         """按文件大小分离"""
@@ -144,16 +198,19 @@ class DocumentClusterer:
                     
                     cluster_id = hashlib.md5(f"{dir_path}:{i}".encode()).hexdigest()[:8]
                     dir_name = Path(dir_path).name or "cluster"
+                    strategy = ClusterStrategy.SUMMARIZE_MULTIPLE if self._is_generic_directory_name(dir_name) or len(batch) >= 4 else ClusterStrategy.COMBINE_SHORT_DOCS
+                    title = self._build_directory_cluster_title(Path(dir_path), strategy)
                     
                     cluster = DocumentCluster(
                         cluster_id=f"dir_{cluster_id}",
                         files=batch,
-                        strategy=ClusterStrategy.COMBINE_SHORT_DOCS,
-                        title=f"Collection: {dir_name}",
+                        strategy=strategy,
+                        title=title,
                         description=f"Combined from {len(batch)} short documents",
                         metadata={
                             "directory": dir_path,
-                            "file_count": len(batch)
+                            "file_count": len(batch),
+                            "title_hint": title,
                         }
                     )
                     clusters.append(cluster)
@@ -217,6 +274,35 @@ class DocumentClusterer:
                 unmatched.append(file)
         
         return clusters, unmatched
+
+    def _looks_like_project_directory(self, directory: Path, files: List[Path]) -> bool:
+        text = str(directory).lower()
+        project_keywords = ["project", "项目", "proto", "repo", "sdk", "module", "service", "client", "server", "app", "component"]
+        code_extensions = {".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rs", ".json", ".yaml", ".yml", ".toml", ".ini", ".sh"}
+        doc_extensions = {".md", ".txt"}
+
+        code_like = sum(1 for file in files if file.suffix.lower() in code_extensions)
+        doc_like = sum(1 for file in files if file.suffix.lower() in doc_extensions)
+        ratio = (code_like + doc_like) / max(len(files), 1)
+
+        return (any(keyword in text for keyword in project_keywords) and code_like >= 3) or (code_like >= 4 and ratio >= 0.6)
+
+    def _is_generic_directory_name(self, name: str) -> bool:
+        lowered = (name or "").strip().lower()
+        if re.fullmatch(r'\d{4}([_-]?\d{2})?', lowered):
+            return True
+        return lowered in {"docs", "document", "documents", "资料", "archive", "collection", "notes", "misc", "tmp"}
+
+    def _build_directory_cluster_title(self, directory: Path, strategy: ClusterStrategy) -> str:
+        dir_name = directory.name or "资料"
+        parent_name = directory.parent.name if directory.parent else ""
+        base = f"{parent_name} {dir_name}".strip() if self._is_generic_directory_name(dir_name) and parent_name else dir_name
+        if strategy == ClusterStrategy.SUMMARIZE_MULTIPLE:
+            return f"{base}主题总结"
+        return f"{base}资料汇总"
+
+    def _build_project_summary_title(self, directory: Path) -> str:
+        return f"{directory.name}项目总览"
     
     def format_cluster(
         self,

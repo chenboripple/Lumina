@@ -47,7 +47,11 @@ class WebInterface:
         self.lumina_config = lumina_config
         self._scan_state: Dict[str, Any] = {
             "running": False,
+            "phase": "idle",
             "started_at": None,
+            "last_event_at": None,
+            "last_completed_at": None,
+            "last_status": "idle",
             "message": "",
             "current_source": "",
             "current_source_index": -1,
@@ -84,6 +88,7 @@ class WebInterface:
                 "skipped_files": 0,
             },
         }
+        self._bootstrap_scan_state_from_history()
         
         if not FLASK_AVAILABLE:
             raise ImportError(
@@ -294,7 +299,9 @@ class WebInterface:
             baseline = self.harness.get_state() if self.harness else {}
             self._scan_state.update({
                 "running": False,
+                "phase": "queued",
                 "started_at": None,
+                "last_event_at": datetime.now().isoformat(),
                 "message": "准备扫描...",
                 "current_source": "",
                 "current_source_index": -1,
@@ -334,7 +341,9 @@ class WebInterface:
 
             def _do_scan():
                 self._scan_state["running"] = True
+                self._scan_state["phase"] = "running"
                 self._scan_state["started_at"] = datetime.now().isoformat()
+                self._scan_state["last_event_at"] = self._scan_state["started_at"]
                 self._scan_state["message"] = "扫描中..."
                 try:
                     for idx, source in enumerate(self.lumina_config.input_sources):
@@ -389,6 +398,10 @@ class WebInterface:
                         finally:
                             if not incremental:
                                 self.harness.config.incremental = orig
+                    self._scan_state["phase"] = "completed"
+                    self._scan_state["last_status"] = "completed"
+                    self._scan_state["last_completed_at"] = datetime.now().isoformat()
+                    self._scan_state["last_event_at"] = self._scan_state["last_completed_at"]
                     self._scan_state["message"] = "扫描完成"
                 except Exception as exc:
                     idx = self._scan_state.get("current_source_index", -1)
@@ -399,6 +412,9 @@ class WebInterface:
                         file=self._scan_state.get("current_source") or "",
                         message=str(exc),
                     )
+                    self._scan_state["phase"] = "failed"
+                    self._scan_state["last_status"] = "failed"
+                    self._scan_state["last_event_at"] = datetime.now().isoformat()
                     self._scan_state["message"] = f"扫描出错: {exc}"
                 finally:
                     self._scan_state["current_source"] = ""
@@ -720,6 +736,53 @@ class WebInterface:
         
         return stats
 
+    def _bootstrap_scan_state_from_history(self):
+        """在服务启动时为扫描状态提供最近一次运行的回显。"""
+        if not self.harness:
+            return
+
+        try:
+            state = self.harness.get_state()
+            output_dir = Path(self.harness.config.output_dir).expanduser() if self.harness else None
+            total_notes = len(list(output_dir.rglob("*.md"))) if output_dir and output_dir.exists() else 0
+            total_processed = int(state.get("processed_files", 0) or 0)
+            total_failed = int(state.get("failed_files", 0) or 0)
+            total_skipped = int(state.get("skipped_files", 0) or 0)
+
+            if total_notes <= 0 and total_processed <= 0 and total_failed <= 0 and total_skipped <= 0:
+                self._scan_state.update({
+                    "phase": "idle",
+                    "last_status": "idle",
+                    "message": "尚未开始扫描",
+                })
+                return
+
+            completed = total_processed + total_failed + total_skipped
+            self._scan_state.update({
+                "phase": "completed" if total_failed == 0 else "failed",
+                "last_status": "completed" if total_failed == 0 else "failed",
+                "message": "最近一次生成已完成" if total_failed == 0 else "最近一次生成包含失败项",
+                "progress_percent": 100.0 if completed > 0 else 0.0,
+                "file_counts": {
+                    "total": completed,
+                    "completed": completed,
+                    "processed": total_processed,
+                    "failed": total_failed,
+                    "skipped": total_skipped,
+                    "pending": 0,
+                },
+                "source_counts": {
+                    "pending": 0,
+                    "processing": 0,
+                    "completed": 0 if completed == 0 else 1,
+                    "failed": 1 if total_failed > 0 else 0,
+                },
+                "last_event_at": datetime.now().isoformat(),
+                "last_completed_at": datetime.now().isoformat(),
+            })
+        except Exception:
+            pass
+
     def _refresh_scan_state_runtime(self):
         """根据当前 queue 与 harness 状态刷新扫描进度。"""
         queue = self._scan_state.get("queue", [])
@@ -806,6 +869,16 @@ class WebInterface:
         self._scan_state["elapsed_seconds"] = round(elapsed_seconds, 1)
         self._scan_state["eta_seconds"] = round(eta_seconds, 1) if eta_seconds is not None else None
         self._scan_state["rate_per_minute"] = round(rate_per_minute, 2)
+
+        if self._scan_state.get("running"):
+            self._scan_state["last_status"] = "running"
+        elif queue:
+            if any(q.get("status") == "failed" for q in queue):
+                self._scan_state["last_status"] = "failed"
+                self._scan_state["phase"] = "failed"
+            elif any(q.get("status") == "completed" for q in queue):
+                self._scan_state["last_status"] = "completed"
+                self._scan_state["phase"] = "completed"
 
     def _append_failed_item(self, source: str, file: str, message: str, tags: Optional[List[str]] = None):
         """向失败列表追加标准化失败项。"""
