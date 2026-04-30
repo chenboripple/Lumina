@@ -167,8 +167,32 @@ llm:
 
 | 值 | 说明 |
 |---|---|
-| `obsidian` | 生成 Obsidian 兼容格式，含 frontmatter 和 `[[双向链接]]` |
+| `obsidian` | 生成 Obsidian 兼容格式，含增强 frontmatter、callouts、层级标签和 `[[双向链接]]` |
 | `plain` | 纯 Markdown，无特定工具依赖 |
+
+当 `output.plugin = obsidian` 时，当前版本默认会写出这些字段：
+
+- `title`
+- `status`
+- `para`
+- `aliases`
+- `up`
+- `related`
+- `tags`
+- `source`
+
+同时会根据检测到的 scene 选择不同 callout 类型，并自动补齐层级标签，例如 `lumina/scene/meeting_notes`、`lumina/para/Projects`。
+
+### `output.scenes` 与文档 scene 模板的区别
+
+`output.scenes` 只决定输出目录第一层如何组织，例如 `工作/Projects`、`学习/Resources`。
+
+它和 Executor 里的文档 scene 模板不是同一件事：
+
+- `output.scenes`：用户配置的目录分层规则
+- 文档 scene 模板：代码里的内容识别与提取策略
+
+当前内置文档 scene 已覆盖会议纪要、学术论文、PRD、设计文档、测试报告、运维文档、邮件、聊天记录等类型，即使你没有配置 `output.scenes`，这些模板也依然会参与内容提取。
 
 ### `harness.quality_threshold`
 

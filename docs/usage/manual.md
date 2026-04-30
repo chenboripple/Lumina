@@ -1,391 +1,229 @@
-# Lumina 使用手册 (Agent 增强版)
+# Lumina 使用手册
 
-## 🚀 快速开始
+## 运行模式
 
-### 安装
-```bash
-git clone https://github.com/chenboripple/Lumina.git
-cd Lumina
-pip install -r requirements.txt
-```
+Lumina 有两种主模式：
 
-### 初始化配置
-```bash
-# 安装后会自动创建 ~/.lumina/lumina.yaml（若不存在）
-# 手动编辑配置文件
-vim ~/.lumina/lumina.yaml
-```
+- 常驻服务：Web 界面 + 目录监听 + 后台初始化同步
+- 一次性处理：处理一个路径或按配置批量处理一组输入源
 
-### 基础使用
-```bash
-# 启动常驻服务（推荐）
-python -m lumina serve
+## 常驻服务
 
-# 服务启动后访问 Web 界面
-# http://127.0.0.1:5000
-
-# 一次性执行处理
-python -m lumina process
-
-# 停止服务
-# Ctrl+C
-```
-
-## 📖 高级功能
-
-### 1. 增量处理
-
-**场景**：每天自动更新笔记库，只处理新增/修改的文件。
+### 启动
 
 ```bash
-# 启动常驻模式后自动监听 input.sources
-python -m lumina serve
+lumina start
+lumina start --port 5088 --no-watch
 ```
 
-**效果**：
-- 启动时先执行一次初始化整理
-- 后续只处理变化的文件，速度提升 **10~50x**
-- 用户可在 Web 页面手动重生成指定笔记
+常用参数：
 
-### 2. 缓存管理
+- `--watch/--no-watch`：是否监听输入目录变化
+- `--initial-sync/--no-initial-sync`：启动后是否自动跑一次初始化处理
+- `--parallel/--no-parallel`：是否并行处理
+- `--vector/--no-vector`：是否启用向量数据库
+- `--threshold`：覆盖质量阈值
 
-**场景**：避免重复处理相同内容，降低 API 成本。
+### 查看状态与停止
 
 ```bash
-# 查看缓存统计
-python -m lumina cache-stats
-
-# 清理缓存
-python -m lumina cache-clear
-
-# 查看缓存大小
-python -m lumina cache-size
+lumina status
+lumina stop
 ```
 
-**效果**：
-- 重复文件处理速度提升 **10~100x**
-- LLM API 成本降低 **90%+**
-
-### 3. 历史查询
-
-**场景**：查看文件处理历史、质量趋势、可解释性。
+### 前台调试
 
 ```bash
-# 查看文件处理历史
-python -m lumina history ~/Documents/important.md
-
-# 查看质量趋势
-python -m lumina history --trend ~/Documents/important.md
-
-# 查看可解释性
-python -m lumina history --explain ~/Documents/important.md
+lumina serve
+lumina serve --no-watch --no-initial-sync
 ```
 
-**输出示例**：
-```
-📄 文件: ~/Documents/important.md
-🕐 处理时间: 2026-04-25 10:00:00
-📊 最终得分: 0.85
-🔄 迭代次数: 3
+前台模式适合看日志、调试异常和验证页面行为。
 
-📋 迭代详情:
-  第1轮: 得分=0.60, 通过=False, 问题数=5
-    修复建议: 内容太短,缺少标题,标签不足...
-  第2轮: 得分=0.75, 通过=False, 问题数=2
-    修复建议: 结构不清晰,缺少关键信息...
-  第3轮: 得分=0.85, 通过=True, 问题数=0
-    修复建议: 无
-```
+## 一次性处理
 
-### 4. 批量处理
-
-**场景**：处理大量文件，需要分批次、优先级控制。
+### 处理配置中的全部输入源
 
 ```bash
-# 自动分批次处理
-python -m lumina scan ~/Documents --batch-size 20
-
-# 只处理高优先级文件
-python -m lumina scan ~/Documents --priority high
-
-# 限制处理数量
-python -m lumina scan ~/Documents --limit 100
+lumina process
 ```
 
-### 5. 成本预估
-
-**场景**：提前了解处理成本，避免意外费用。
+### 处理指定目录或文件
 
 ```bash
-# 预估处理成本
-python -m lumina scan ~/Documents --dry-run
-
-# 输出示例
-📋 处理计划 #a1b2c3d4
-📂 总文件数: 126
-💰 预估成本: $0.2450
-⏱️  预估时间: 125.3s
-📦 批次数: 14
-⚡ 缓存命中: 42 个文件
-🔄 增量文件: 84 个文件
+lumina process ~/Desktop/bymonth
+lumina process ~/Desktop/bymonth --no-incremental
+lumina process ~/Desktop/bymonth --no-vector --parallel
 ```
 
-## ⚙️ 配置文件
+实际行为：
 
-### 完整配置示例
-```yaml
-# ~/.lumina/lumina.yaml
+- 未传路径时，遍历 `input.sources`
+- 传路径时，只处理该路径
+- `--incremental` 开启时，只处理内容发生变化的文件
+- `--recursive` 可以覆盖配置里的递归设置
 
-# LLM 配置
-llm:
-  provider: openai
-  model: gpt-4
-  temperature: 0.3
-  max_tokens: 2000
-  timeout: 60
-  max_retries: 3
+## Web 仪表盘
 
-# Harness 配置
-harness:
-  max_iterations: 3
-  quality_threshold: 0.8
-  output_dir: "./output"
+默认地址：`http://127.0.0.1:5088`
 
-# 缓存配置
-cache:
-  enabled: true
-  dir: "~/.lumina/cache"
-  max_size_gb: 10
-  llm_ttl_days: 7
+当前页面能力：
 
-# 历史配置
-history:
-  enabled: true
-  dir: "~/.lumina/history"
-  max_records: 100000
-  retention_days: 365
+- 扫描队列与实时进度条
+- 最近一次扫描状态回显
+- 失败详情查看
+- 失败项批量重生成、导出、删除、打标签
+- 已生成笔记浏览与单篇重生成
+- 向量搜索与知识图谱
 
-# 输入配置
-input:
-  sources:
-    - path: "~/Documents"
-      recursive: true
-      filter: "*.md"
-    - path: "~/Downloads"
-      recursive: false
-      filter: "*.pdf"
+### 扫描状态语义
 
-# 输出配置
-output:
-  plugin: obsidian
-  base_dir: "~/Lumina/Notes"
-  vault_path: "~/Obsidian/Vault"
-  
-  structure:
-    by_date: false
-    by_type: true
-    flat: false
-  
-  naming:
-    prefix_date: false
-    slugify: true
-```
+仪表盘顶部状态卡片不是简单的“是否正在运行”。当前逻辑会区分：
 
-## 🔧 最佳实践
+- `idle`：尚未开始
+- `queued`：已排队，等待后台线程执行
+- `running`：正在处理输入源队列
+- `completed`：最近一次运行完成
+- `failed`：最近一次运行含失败项或运行中断
 
-### 1. 日常增量更新
+对应接口是 `/api/scan/status`，其中会返回：
+
+- `queue`
+- `source_counts`
+- `file_counts`
+- `progress_percent`
+- `elapsed_seconds`
+- `eta_seconds`
+- `rate_per_minute`
+- `failed_items`
+- `last_status`
+- `last_completed_at`
+
+## 实际处理逻辑
+
+### 1. 文件选择
+
+每个输入文件必须同时满足：
+
+- 扩展名在 `supported_extensions` 中
+- 路径匹配对应输入源的 `filter` glob
+
+这条规则同时用于：
+
+- 正常扫描
+- 页面里的按源文件重生成
+- 单笔记重生成
+
+### 2. 增量处理
+
+Harness 会基于 `FileChangeTracker` 判断文件内容是否变化。只有真的产出笔记的文件才会被标记为已处理；失败或没有输出的文件不会被错误标记成“已完成”。
+
+### 3. 内容过滤与脱敏
+
+在调用 LLM 之前，Executor 会通过 `ContentFilter` 做前置策略判断：
+
+- 空白文件、模板文件
+- 重复内容
+- 几乎不可读的扫描 PDF
+- 低知识密度文档
+- 大量样本事实、清单、映射表、客观流水
+- 敏感字段脱敏
+
+结果可能是：
+
+- 直接跳过
+- 降级保留抽象结论，不保留细节样本
+- 允许处理，但输出阶段继续兜底脱敏
+
+### 4. 文档聚合
+
+Planner 不再是“一文件一笔记”的朴素模型。当前会插入三类聚合任务：
+
+- 同目录短文档聚合
+- 项目目录总览
+- 批次级全局知识地图
+
+另外，如果检测到和已有笔记标题匹配，也可能进入追加模式。
+
+### 5. 输出落盘
+
+Harness 保存结果时会：
+
+- 根据 `note_subdir` 落入场景/PARA 子目录
+- 先按 `source` 匹配已有笔记，避免重复生成
+- source 不命中时按标题相似度兜底
+- 命中旧平铺路径时迁移到新结构路径
+
+## Obsidian 输出
+
+当 `output.plugin = obsidian` 时，生成内容会包含：
+
+- YAML frontmatter：`title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
+- Scene 对应的 callout 类型
+- `[[link]]` 链接语法
+- 层级标签，例如 `#lumina/scene/academic_paper`
+
+`status` 由质量分决定：
+
+- `stable`：分数 >= 0.85
+- `draft`：分数 >= 0.65 且 < 0.85
+- `review`：分数 < 0.65
+
+## 向量能力
+
 ```bash
-# 创建定时任务（crontab）
-0 9 * * * lumina scan ~/Documents --output ~/Obsidian/Vault >> ~/logs/lumina.log 2>&1
-```
-
-### 2. 监控处理质量
-```bash
-# 生成质量报告
-lumina quality-report --output report.html
-
-# 查看质量趋势
-lumina history --trend-all --days 30
-```
-
-### 3. 优化处理速度
-```bash
-# 使用缓存（默认开启）
-lumina scan ~/Documents --cache
-
-# 调整批量大小
-lumina scan ~/Documents --batch-size 50
-
-# 使用更快的模型（调试时）
-lumina scan ~/Documents --model gpt-3.5-turbo
-```
-
-### 4. 处理大文件
-```bash
-# 跳过超大文件
-lumina scan ~/Documents --max-size 10MB
-
-# 分段处理大文件
-lumina scan ~/Documents --chunk-size 4000
-```
-
-## 🐛 故障排查
-
-### 问题1：处理速度很慢
-**原因**：
-- 首次扫描，没有缓存
-- 文件数量太多
-- 使用了昂贵的模型
-
-**解决**：
-```bash
-# 检查缓存状态
-lumina cache-stats
-
-# 使用增量模式
-lumina scan ~/Documents --incremental
-
-# 使用更快的模型
-lumina scan ~/Documents --model gpt-3.5-turbo
-```
-
-### 问题2：API 成本太高
-**原因**：
-- 没有启用缓存
-- 重复处理相同文件
-- 使用了昂贵的模型
-
-**解决**：
-```bash
-# 启用缓存
-lumina scan ~/Documents --cache
-
-# 使用增量模式
-lumina scan ~/Documents --incremental
-
-# 预估成本
-lumina scan ~/Documents --dry-run
-```
-
-### 问题3：处理结果质量差
-**原因**：
-- 质量阈值设置太低
-- 迭代次数不够
-- 提示词模板不合适
-
-**解决**：
-```bash
-# 提高质量阈值
-lumina scan ~/Documents --threshold 0.9
-
-# 增加迭代次数
-lumina scan ~/Documents --max-rounds 5
-
-# 查看历史，分析质量问题
-lumina history --explain ~/Documents/problematic.md
-```
-
-### 问题4：缓存不命中
-**原因**：
-- 文件内容变化
-- 提示词模板变化
-- 模型参数变化
-
-**解决**：
-```bash
-# 查看缓存统计
-lumina cache-stats
-
-# 清理缓存，重新生成
-lumina cache-clear
-
-# 检查提示词模板是否稳定
-```
-
-## 📊 性能优化
-
-### 缓存命中率优化
-| 场景 | 命中率 | 优化建议 |
-|------|--------|----------|
-| 首次扫描 | 0% | 无需优化 |
-| 二次扫描无变化 | 95%+ | 保持现状 |
-| 二次扫描10%变化 | 85% | 检查文件变化原因 |
-| 日常增量更新 | 70%~90% | 优化文件组织 |
-
-### 批量大小优化
-| 文件大小 | 推荐批量 | 说明 |
-|----------|----------|------|
-| <100KB | 20~50 | 小文件批量大 |
-| 100KB~1MB | 10~20 | 中等文件批量适中 |
-| >1MB | 3~5 | 大文件批量小 |
-
-## 🎯 典型工作流
-
-### 工作流1：个人知识库维护
-```bash
-# 1. 初始化
-lumina init
-
-# 2. 首次全量扫描
-lumina scan ~/Documents --output ~/Obsidian/Vault --full-scan
-
-# 3. 设置定时增量更新
-crontab -e
-# 添加：0 9 * * * lumina scan ~/Documents --output ~/Obsidian/Vault
-
-# 4. 每周查看质量报告
-lumina quality-report --week
-```
-
-### 工作流2：项目文档整理
-```bash
-# 1. 扫描项目文档
-lumina scan ./docs --output ./notes
-
-# 2. 查看处理计划（预估成本）
-lumina scan ./docs --dry-run
-
-# 3. 执行处理
-lumina scan ./docs --output ./notes
-
-# 4. 查看处理历史
-lumina history --trend ./docs/README.md
-```
-
-### 工作流3：批量文件处理
-```bash
-# 1. 扫描大量文件
-lumina scan ~/Downloads --batch-size 50
-
-# 2. 监控处理进度
-lumina scan ~/Downloads --progress
-
-# 3. 查看处理统计
+lumina search "差旅"
+lumina related "Projects/差旅报销设计说明.md"
+lumina graph --output graph.json
 lumina stats
-
-# 4. 清理缓存
-lumina cache-clear
 ```
 
-## 📞 获取帮助
+说明：`search`、`related`、`graph`、`stats` 都依赖向量数据库。未索引过内容时，这些命令不会返回有效结果。
 
-### 命令行帮助
+## 常见操作
+
+### 全量重跑
+
 ```bash
-# 查看所有命令
-lumina --help
-
-# 查看具体命令帮助
-lumina scan --help
-lumina history --help
-lumina cache --help
+lumina stop
+rm -rf ~/obsidian/Archive ~/obsidian/Areas ~/obsidian/Projects ~/obsidian/Resources
+rm -rf ~/.lumina/cache ~/.lumina/fingerprints ~/.lumina/history
+lumina start
 ```
 
-### 文档资源
-- [架构文档](../architecture/planner.md)
-- [缓存系统](../architecture/cache.md)
-- [历史系统](../architecture/history.md)
-- [升级指南](../develop/upgrade-guide.md)
+### 手动验证 Web 层
 
-### 社区支持
-- GitHub Issues: https://github.com/chenboripple/Lumina/issues
-- 邮件: chenboripple@gmail.com
+```bash
+curl http://127.0.0.1:5088/api/stats
+curl http://127.0.0.1:5088/api/scan/status
+```
+
+## 故障排查
+
+### 页面一直显示等待处理
+
+优先检查：
+
+```bash
+lumina status
+curl http://127.0.0.1:5088/api/scan/status
+```
+
+说明：当前版本的状态卡片会保留最近一次完成或失败状态。如果这里仍然长期停在 `idle`，通常说明服务刚启动且还没有扫描历史，或前端没有连到当前服务实例。
+
+### 重生成提示文件不允许
+
+这通常不是 bug，而是当前源文件不满足当前配置：
+
+- 不在 `input.sources` 范围内
+- 扩展名不在 `supported_extensions`
+- 不匹配 `filter`
+
+### 向量命令不可用
+
+先确认处理时没有关闭向量：
+
+```bash
+lumina process --vector
+lumina start --vector
+```

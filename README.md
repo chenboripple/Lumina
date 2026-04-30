@@ -1,15 +1,20 @@
 # Lumina
 
-> 从本地文件萃取知识，生成结构化笔记的 AI Agent
+> 从本地文件中提炼知识，生成结构化 Markdown/Obsidian 笔记的常驻服务。
 
-Lumina 是一个**本地常驻知识整理服务**。它从 `~/.lumina/lumina.yaml` 读取输入目录与输出规则，启动后常驻运行，提供 Web 管理界面、目录变化监听、自动增量更新，以及手动重生成笔记能力。
+Lumina 会读取 `~/.lumina/lumina.yaml` 中配置的输入源、输出目录、LLM 参数和目录结构规则，然后通过 Planner -> Executor -> Validator -> Harness 这条链路，把原始文件整理成可检索、可链接、可在 Obsidian 中继续使用的笔记。
 
-```
-本地文件 ──► Planner ──► Executor ──► Validator ──► Obsidian / Markdown
-             (扫描规划)   (AI 生成)    (质量验证)
-                              ▲            │
-                              └── 迭代修复 ┘
-```
+## 当前能力
+
+- 常驻服务模式：启动 Web 界面、目录监听、后台初始化同步
+- 一次性处理模式：按路径或按 `input.sources` 批量处理
+- 增量更新：只重跑内容发生变化的文件
+- 内容策略：低知识密度过滤、样本事实降级、敏感字段脱敏
+- 文档聚合：短文档按目录合并、项目目录总览、全局知识地图
+- 场景模板：会议纪要、学术论文、PRD、设计文档、测试报告、运维文档、邮件、聊天记录等
+- Obsidian 增强输出：frontmatter、callouts、层级标签、related/up/aliases
+- Web 仪表盘：扫描队列、实时进度、最近一次运行结果、失败项批量操作
+- 向量能力：语义搜索、关联笔记、知识图谱
 
 ## 安装
 
@@ -19,115 +24,127 @@ cd Lumina
 python install.py
 ```
 
-更多安装方式见 [docs/installation.md](docs/installation.md)。
+更多安装说明见 [docs/installation.md](/Users/ripple/work%20space/Lumina/docs/installation.md)。
 
 ## 配置
 
-所有配置通过 `~/.lumina/lumina.yaml` 管理，**不读取环境变量**。
+所有运行配置都来自 `~/.lumina/lumina.yaml`，包括：
 
-**最小配置：**
+- `input.sources`：输入目录、递归策略、glob 过滤规则
+- `supported_extensions`：允许处理的扩展名
+- `output.base_dir` / `output.plugin`：输出目录和格式
+- `output.scenes` / `output.categories`：场景层和 PARA 目录映射
+- `harness.max_iterations` / `harness.quality_threshold`
+- `llm` 以及 `llm_planner` / `llm_executor` / `llm_validator`
 
-```yaml
-llm:
-  provider: openai
-  api_key: "sk-..."
-  model: gpt-4
-```
-
-完整字段说明和各 Agent 独立 LLM 配置见 [docs/lumina-yaml-demo.md](docs/lumina-yaml-demo.md)。
+完整示例见 [docs/lumina-yaml-demo.md](/Users/ripple/work%20space/Lumina/docs/lumina-yaml-demo.md)。
 
 ## 使用
 
+### 常驻服务
+
 ```bash
-# 后台启动常驻服务（推荐）
 lumina start
-
-# 查看服务状态
 lumina status
-
-# 停止后台服务
 lumina stop
+```
 
-# 打开 Web 界面
-# http://127.0.0.1:5088
+默认地址是 `http://127.0.0.1:5088`。
 
-# 前台调试模式（保留）
+`lumina start` 会在后台启动 `lumina serve`，并维护：
+
+- `~/.lumina/service.pid`
+- `~/.lumina/service.json`
+- `~/.lumina/service-YYYY-MM-DD.log`
+
+### 前台服务
+
+```bash
 lumina serve
+lumina serve --host 127.0.0.1 --port 5088 --no-watch --no-initial-sync
+```
 
-# 一次性手动处理（可选）
+`serve` 会：
+
+1. 启动 Web 界面
+2. 可选地监听 `input.sources`
+3. 在页面可访问后触发一次后台初始化同步
+
+### 一次性处理
+
+```bash
 lumina process
 lumina process ~/Documents
-
-# 调试模式
-lumina debug
+lumina process ~/Documents --no-incremental --no-vector
 ```
 
-服务模式下：
+- 不传路径时，按 `input.sources` 逐个处理
+- 传路径时，只处理指定文件或目录
+- `--incremental/--no-incremental` 控制是否跳过未变化文件
 
-1. 启动时会先按 `~/.lumina/lumina.yaml` 执行一次初始化处理
-2. 随后持续监听 `input.sources` 中的目录变化
-3. 检测到文件新增/修改后自动增量更新对应笔记
-4. 也可以在页面中手动触发单篇笔记重新生成
-5. 后台服务会维护 `~/.lumina/service.pid` 与按日期拆分的 `~/.lumina/service-YYYY-MM-DD.log`
-6. 默认仅保留最近 15 天日志，可用 `service.log_retention_days` 覆盖
-
-## 核心架构
-
-Lumina 基于 **Harness Engineering** 设计，分离生成与评估，建立迭代修复循环：
-
-| 组件 | 职责 |
-|---|---|
-| **Planner** | 扫描目录，分析文件类型，制定处理策略 |
-| **Executor** | 调用 LLM，提取核心信息，生成 Markdown 笔记 |
-| **Validator** | 质量评分，发现问题，驱动 Executor 迭代修复 |
-| **Harness** | 协调三者，控制迭代轮数和质量阈值 |
-
-每篇笔记在质量得分超过 `quality_threshold`（默认 0.8）或达到 `max_iterations`（默认 3）前会持续迭代。
-
-## 输出格式
-
-内置两种输出插件，通过 `output.plugin` 切换：
-
-| 插件 | 说明 |
-|---|---|
-| `obsidian`（默认） | 含 frontmatter、`[[双向链接]]`、标签，兼容 Obsidian |
-| `plain` | 纯 Markdown，无工具依赖 |
-
-## 目录结构
-
-```
-Lumina/
-├── src/lumina/          # 核心包
-│   ├── harness.py       # 主流程协调
-│   ├── planner.py       # 文件扫描与规划
-│   ├── executor.py      # 笔记生成
-│   ├── validator.py     # 质量验证
-│   └── llm.py           # LLM Provider 抽象
-├── tests/
-│   ├── unit/            # 单元测试（pytest）
-│   ├── integration/     # 集成测试（pytest）
-│   └── manual/          # 手动验证脚本
-├── docs/
-│   ├── lumina-yaml-demo.md   # 配置文件完整示例
-│   ├── installation.md       # 安装指南
-│   └── usage/manual.md       # 详细使用手册
-└── README.md
-```
-
-## 开发
+### 向量相关命令
 
 ```bash
-# 安装开发依赖
-pip install -e ".[dev]"
-
-# 运行测试
-pytest tests/unit tests/integration -v
-
-# 手动验证
-python tests/manual/run_all_manual_checks.py
+lumina search "差旅报销"
+lumina related "Projects/差旅系统设计说明.md"
+lumina graph --min-similarity 0.75 --output graph.json
+lumina stats
 ```
 
-## 许可证
+## Web 界面
 
-[CC BY-NC 4.0](LICENSE) — 可自由分享和修改，不可用于商业目的。如需商业授权请联系作者。
+仪表盘覆盖这些能力：
 
+- `/api/scan`：触发按配置输入源的后台扫描
+- `/api/scan/status`：返回队列、文件级进度、速度、ETA、最近一次运行状态
+- `/api/notes/<id>/regenerate`：按笔记来源重生成
+- `/api/regenerate-source`：按源文件路径重生成
+- `/api/scan/failures/regenerate`：批量重试失败项
+- `/api/scan/failures/tag`：给失败项打标签
+- `/api/scan/failures/delete`：删除失败记录
+- `/api/search`、`/api/graph`、`/api/vector-stats`：搜索与图谱能力
+
+说明：`/api/status` 返回的是 Harness 运行状态；仪表盘顶部扫描卡片使用的是 `/api/scan/status`。
+
+## 输出行为
+
+### Planner
+
+- 同时执行 `supported_extensions` 和 `input.sources[].filter` 两层过滤
+- 为文件分配 `note_subdir`
+- 短文档会按目录聚合
+- 项目型目录会生成“项目总览”簇
+- 文件数量足够多时会插入“全局知识地图”任务
+
+### Executor
+
+- 先做内容过滤，再做场景识别和 LLM 生成
+- 对低价值文件直接跳过，不进入验证与保存
+- 对生成结果执行标题归一化，避免落回原始文件名或占位标题
+
+### Obsidian 插件
+
+默认输出包含：
+
+- frontmatter：`title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
+- 场景感知 callout
+- 层级标签，例如 `lumina/scene/meeting_notes`
+- `[[双向链接]]`
+
+## 文档索引
+
+- [docs/start-here.md](/Users/ripple/work%20space/Lumina/docs/start-here.md)
+- [docs/usage/manual.md](/Users/ripple/work%20space/Lumina/docs/usage/manual.md)
+- [docs/advanced-features.md](/Users/ripple/work%20space/Lumina/docs/advanced-features.md)
+- [docs/architecture/planner.md](/Users/ripple/work%20space/Lumina/docs/architecture/planner.md)
+- [docs/architecture/harness.md](/Users/ripple/work%20space/Lumina/docs/architecture/harness.md)
+
+## 开发与验证
+
+```bash
+/usr/bin/python3 -m unittest tests.unit.test_content_policy tests.unit.test_planning_optimizations
+/usr/bin/python3 -m py_compile src/lumina/web_interface.py
+node --check src/lumina/web/static/js/app.js
+```
+
+说明：这个仓库里根目录的 `lumina.py` 可能会影响临时导入测试；手动跑模块时优先确保 `src` 在 `PYTHONPATH` 前面。

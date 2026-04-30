@@ -1,230 +1,193 @@
-# Planner 模块 (Agent 增强版) 文档
+# Planner 模块文档
 
-## 🎯 模块定位
+## 模块定位
 
-Planner 是 Lumina 的**智能决策大脑**，负责分析输入、制定最优处理策略，是 Agent 能力的核心体现。
+Planner 负责三件事：
 
-## ✨ 核心能力
+1. 扫描输入路径，产出 `FileInfo`
+2. 在处理前做结构化规划和聚合
+3. 为输出阶段准备目录结构和批次策略
 
-### 1. 🔍 智能扫描与变化检测
-- 自动识别新增/修改的文件，支持增量处理
-- 文件哈希校验，避免重复处理相同内容
-- 跳过系统文件、隐藏文件、超大文件
-- 支持按目录递归扫描
+它不负责真正调用 LLM，也不负责验证结果质量，但它决定了“哪些东西会被处理、怎样组合、落到什么目录”。
 
-### 2. 📊 文件智能评估
-- **优先级排序**：按文件类型、大小、重要性自动分配处理优先级
-- **成本预估**：自动估算 LLM Token 消耗和处理成本
-- **时间预估**：智能估算每个文件的处理时间
-- **能力识别**：自动识别文件处理所需的特殊能力（OCR、视觉、PDF解析等）
+## 公开接口
 
-### 3. 🧠 资源感知的批量策略
-- 按文件大小智能分批次：小文件批量大，大文件批量小
-- 按能力需求分批次：同类能力需求的文件一起处理
-- 优先级保障：高优先级文件优先处理
+### `scan(input_path, recursive=True, file_filter=None, supported_extensions=None)`
 
-### 4. 💾 缓存与增量处理
-- 自动识别已处理文件，避免重复劳动
-- 支持断点续传，程序中断后无需重新处理
-- 缓存命中统计，提升处理效率
+行为：
 
-### 5. 📈 处理计划可视化
-- 生成结构化处理计划，包含完整的成本、时间、资源预估
-- 友好的文本摘要输出，让用户提前了解处理规模
+- 支持扫描单文件或目录
+- 同时应用 `supported_extensions` 与 glob `file_filter`
+- 为每个文件计算：类型、大小、修改时间、内容哈希、预估成本、能力需求
 
-## 🏗️ 架构设计
+说明：当前 `scan` 没有 `incremental` 参数。增量过滤发生在 Harness 层。
 
-```
-┌─────────────────────────────────────────────┐
-│                   Planner                     │
-├─────────────────────────────────────────────┤
-│  1. 扫描器 (Scanner)                         │
-│     - 文件发现                               │
-│     - 哈希计算                               │
-│     - 类型识别                               │
-│                                             │
-│  2. 评估器 (Evaluator)                       │
-│     - 优先级计算                             │
-│     - 成本/时间预估                          │
-│     - 能力需求识别                           │
-│                                             │
-│  3. 批次生成器 (Batcher)                     │
-│     - 智能分批次                             │
-│     - 资源感知调度                           │
-│                                             │
-│  4. 状态管理器 (StateManager)                │
-│     - 已处理文件追踪                         │
-│     - 增量更新                               │
-└─────────────────────────────────────────────┘
-```
+### `plan(files, existing_notes=None)`
 
-## 📋 数据结构
+行为：
 
-### FileInfo（文件信息）
+- 将输入文件做聚合和批次规划
+- 为每个任务分配 `note_subdir`
+- 在文件足够多时插入全局知识地图任务
+- 返回 `ProcessingPlan`
+
+## 关键数据结构
+
+### `FileInfo`
+
 ```python
 @dataclass
 class FileInfo:
-    path: Path                    # 文件路径
-    type: str                     # 文件类型
-    size: int                     # 文件大小（字节）
-    modified: float               # 修改时间
-    hash: str                     # 内容哈希（MD5）
-    processing_priority: int      # 处理优先级（0最高）
-    estimated_cost: float         # 预估成本（美元）
-    estimated_time: float         # 预估时间（秒）
-    required_capabilities: List[str]  # 需要的能力
+    path: Path
+    type: str
+    size: int
+    modified: float
+    hash: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
+    processing_priority: int = 0
+    estimated_cost: float = 0.0
+    estimated_time: float = 0.0
+    required_capabilities: List[str] = field(default_factory=list)
 ```
 
-### ProcessingPlan（处理计划）
+`metadata` 在当前版本里非常关键，常见字段包括：
+
+- `note_subdir`
+- `is_cluster`
+- `cluster_id`
+- `cluster_files`
+- `cluster_strategy`
+- `cluster_title`
+- `overview_scope`
+- `title_hint`
+- `para`
+
+### `ProcessingPlan`
+
 ```python
 @dataclass
 class ProcessingPlan:
-    plan_id: str                  # 计划ID
-    created_at: float             # 创建时间
-    total_files: int              # 总文件数
-    total_estimated_cost: float   # 总成本预估
-    total_estimated_time: float   # 总时间预估
-    batches: List[List[FileInfo]] # 处理批次
-    strategy: str                 # 处理策略描述
-    priorities: Dict              # 优先级分组
-    capabilities_required: List[str]  # 需要的能力
-    cache_hits: int               # 缓存命中数
-    incremental_files: int        # 增量文件数
+    total_files: int
+    total_estimated_cost: float
+    total_estimated_time: float
+    strategy: str
+    batches: List[List[FileInfo]]
+    summary: str
 ```
 
-## 🚀 快速使用
+## 当前规划逻辑
 
-### 基础用法
-```python
-from lumina.planner import Planner
-from lumina.cache import CacheManager
+### 1. 基础扫描
 
-# 初始化
-cache_manager = CacheManager()
-planner = Planner(cache_manager=cache_manager)
+Planner 会先根据扩展名和 glob 规则筛选文件，然后调用 `_analyze_file()` 生成 `FileInfo`。
 
-# 扫描目录
-files = planner.scan("/path/to/your/documents")
-print(f"找到 {len(files)} 个需要处理的文件")
+类型优先级当前是：
 
-# 制定计划
-plan = planner.plan(files)
+- `markdown`
+- `text`
+- `code`
+- `pdf`
+- `image`
+- `data`
+- `unknown`
 
-# 打印计划摘要
-print(planner.get_plan_summary(plan))
+### 2. 文档聚合
 
-# 执行计划...
-```
+当前通过 `DocumentClusterer` 插入三类聚合任务。
 
-### 增量扫描
-```python
-# 只扫描新增/修改的文件（默认开启）
-files = planner.scan("/path/to/your/documents", incremental=True)
-```
+#### 项目目录聚合
 
-### 全量扫描
-```python
-# 扫描所有文件，不管是否处理过
-files = planner.scan("/path/to/your/documents", incremental=False)
-```
+当目录同时满足这些特征时，Planner 会优先把它视作项目而不是零散资料：
 
-## 🎛️ 配置参数
+- 文件数量达到阈值
+- 代码/文档比例较高
+- 目录名或内容特征接近 project/repo/module/service/app 等
 
-### 优先级规则
-| 优先级 | 文件类型 | 说明 |
-|--------|----------|------|
-| 0（最高） | Markdown、文本文件（<100KB） | 笔记类优先处理 |
-| 1 | 代码、配置文件 | 重要结构化数据 |
-| 2 | PDF、Word、Excel | 文档类 |
-| 3 | 图片、媒体文件 | 资源类 |
-| 4（最低） | 大文件、其他类型 | 低优先级 |
+产物是一个 `SUMMARIZE_MULTIPLE` 簇，标题通常为“`目录名项目总览`”。
 
-### 批量规则
-| 文件大小 | 批量大小 | 说明 |
-|----------|----------|------|
-| <100KB | 20 | 小文件批量大，提升处理效率 |
-| 100KB~1MB | 10 | 中等文件批量适中 |
-| >1MB | 3 | 大文件批量小，避免OOM |
+#### 短文档目录聚合
 
-### 阈值配置
-```python
-# 可配置阈值
-SMALL_FILE_THRESHOLD = 100 * 1024  # 100KB
-LARGE_FILE_THRESHOLD = 1 * 1024 * 1024  # 1MB
-HUGE_FILE_THRESHOLD = 10 * 1024 * 1024  # 10MB
-```
+短文档会按目录分组：
 
-## 📊 输出示例
+- 普通目录：倾向 `COMBINE_SHORT_DOCS`
+- 泛化目录名或文件较多：倾向 `SUMMARIZE_MULTIPLE`
 
-### 计划摘要
-```
-📋 处理计划 #a1b2c3d4
-📂 总文件数: 126
-💰 预估成本: $0.2450
-⏱️  预估时间: 125.3s
-📦 批次数: 14
-💡 处理策略: 35个markdown，28个code，22个image，20个pdf，14个data，3个大文件批次，7个中等文件批次，4个小文件批次处理
-⚡ 缓存命中: 42 个文件
-🔄 增量文件: 126 个文件
-🛠️  需要能力: pdf_parsing, vision
-🔝 高优先级文件 (35): README.md, INSTALL.md, CONFIG.md...
-```
+标题由目录名自动生成，例如：
 
-## 🔧 扩展开发
+- `xxx资料汇总`
+- `xxx主题总结`
 
-### 添加新的文件类型支持
-```python
-# 在 Planner.SUPPORTED_TYPES 中添加
-SUPPORTED_TYPES = {
-    '.md': 'markdown',
-    '.txt': 'text',
-    '.docx': 'document',  # 新增
-    # ...
-}
-```
+#### 追加到已有笔记
 
-### 自定义优先级规则
-```python
-def _evaluate_file(self, file_info: FileInfo) -> FileInfo:
-    # 自定义优先级逻辑
-    if "重要" in file_info.path.name:
-        file_info.processing_priority = 0  # 强制最高优先级
-    # ... 其他逻辑
-```
+如果传入了 `existing_notes`，DocumentClusterer 会按标题和文件名做近似匹配，命中后会生成 `APPEND_TO_EXISTING` 类型的簇。
 
-### 添加新的能力识别
-```python
-# 在 _evaluate_file 中添加
-if file_info.path.suffix == '.docx':
-    file_info.required_capabilities.append('docx_parsing')
-```
+## 全局知识地图
 
-## 🎯 性能特性
+当本轮输入文件足够多时，Planner 会在批次前插入一个 synthetic cluster：
 
-- **O(n) 扫描速度**：线性时间扫描目录
-- **哈希缓存**：文件哈希只计算一次
-- **增量处理**：二次扫描只处理变化的文件，速度提升10~50x
-- **内存高效**：文件内容按需加载，不会一次性加载所有文件
+- `cluster_id = global_overview`
+- `overview_scope = global`
+- `title_hint = 全局知识地图`
 
-## 🔒 安全特性
+它会选取代表性文件，并生成一份 overview catalog，包括：
 
-- 自动跳过系统文件和隐藏文件
-- 自动跳过超大文件（>100MB）
-- 路径注入防护
-- 安全的哈希计算
+- domain counts
+- PARA counts
+- type counts
+- top directories
 
-## 📈 版本历史
+这个任务不是普通目录聚合，而是批次级总览任务。
 
-| 版本 | 发布日期 | 核心功能 |
-|------|----------|----------|
-| 0.1.0 | 2026-04-25 | 初始版本，基础文件扫描与计划 |
-| 0.2.0 | 2026-04-25 | Agent 能力增强，缓存、增量、批量策略 |
+## 目录结构分配
 
----
+Planner 会在 `_assign_note_structure()` 中写入 `note_subdir`。
 
-## 🤝 贡献指南
+规则如下：
 
-1. 优先级逻辑修改需要附带性能测试
-2. 新增文件类型需要在文档中更新类型列表
-3. 性能敏感代码需要做内存和速度测试
-4. 所有新功能需要附带单元测试
+- `flat=true`：不分目录
+- 配置了 `output.scenes`：输出为 `场景/PARA`
+- 未配置 `output.scenes`：输出为 `PARA`
+
+### PARA 推断
+
+`_infer_para()` 的优先级：
+
+1. `metadata["para"]` 显式值
+2. cluster 默认归到 `Resources`
+3. 文件名关键词命中 `Archive` / `Projects` / `Areas`
+4. 场景到 PARA 的兜底映射
+
+### 场景层推断
+
+`output.scenes` 是用户自定义的目录组织规则，不等同于 `SceneDetector` 的文档场景模板。
+
+- 这里是按文件名关键词匹配场景目录
+- 匹配不到时用 `default_scene`
+- 仍匹配不到时回退到第一个场景名
+
+## 批次策略
+
+Planner 目前只使用简单、稳定的分批逻辑：
+
+- 小文件 `< 100KB`：每批 5 个
+- 中等文件 `< 1MB`：每批 3 个
+- 大文件 `>= 1MB`：每批 1 个
+
+策略名由平均文件大小决定：
+
+- `batch_parallel`
+- `sequential`
+- `resource_aware`
+
+## 和旧文档最容易混淆的点
+
+- `scan()` 没有 `incremental=True/False` 参数
+- `ProcessingPlan` 没有 `plan_id`、`created_at`、`priorities` 这些字段
+- 增量过滤不在 Planner，而在 Harness `_filter_incremental()`
+- 当前 Planner 已经负责插入“项目总览”和“全局知识地图”任务，不再只是基础扫描器
+
+## 相关文件
+
+- [src/lumina/planner.py](/Users/ripple/work%20space/Lumina/src/lumina/planner.py)
+- [src/lumina/document_cluster.py](/Users/ripple/work%20space/Lumina/src/lumina/document_cluster.py)
+- [src/lumina/config_core.py](/Users/ripple/work%20space/Lumina/src/lumina/config_core.py)
