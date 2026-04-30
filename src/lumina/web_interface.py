@@ -88,6 +88,7 @@ class WebInterface:
                 "skipped_files": 0,
             },
         }
+        self._scan_state_lock = threading.Lock()
         self._bootstrap_scan_state_from_history()
         
         if not FLASK_AVAILABLE:
@@ -783,18 +784,71 @@ class WebInterface:
         except Exception:
             pass
 
+    def report_runtime_activity(self, target_path: str, mode: str = "processing"):
+        """让非 /api/scan 触发的后台任务也能在仪表盘上显示当前处理目标。"""
+        now = datetime.now().isoformat()
+        mode_text = {
+            "initial_sync": "后台初始化同步中...",
+            "incremental": "增量更新中...",
+            "processing": "后台处理中...",
+        }.get(mode, "后台处理中...")
+
+        with self._scan_state_lock:
+            self._scan_state.update({
+                "running": True,
+                "phase": "running",
+                "last_status": "running",
+                "started_at": self._scan_state.get("started_at") or now,
+                "last_event_at": now,
+                "current_source": str(target_path or ""),
+                "current_source_index": -1,
+                "message": mode_text,
+            })
+
+    def clear_runtime_activity(self, target_path: Optional[str] = None):
+        """清理当前后台任务显示，避免旧路径残留在仪表盘。"""
+        with self._scan_state_lock:
+            current_source = str(self._scan_state.get("current_source") or "")
+            if target_path and current_source and current_source != str(target_path):
+                return
+            self._scan_state["current_source"] = ""
+            self._scan_state["current_source_index"] = -1
+            self._scan_state["last_event_at"] = datetime.now().isoformat()
+
     def _refresh_scan_state_runtime(self):
         """根据当前 queue 与 harness 状态刷新扫描进度。"""
         queue = self._scan_state.get("queue", [])
         if not isinstance(queue, list):
             queue = []
 
+        live = self.harness.get_state() if self.harness else {}
+        harness_running = str(live.get("status", "")).lower() == "running"
+
+        # `serve` 的初始化同步和目录监听会直接调用 harness.run，
+        # 这条路径不会显式设置 _scan_state.running，但用户仍需要看到“正在处理”。
+        previous_phase = str(self._scan_state.get("phase", "")).lower()
+        previous_message = str(self._scan_state.get("message", "")).strip()
+
+        if harness_running:
+            if not self._scan_state.get("running"):
+                started_at = self._scan_state.get("started_at") or datetime.now().isoformat()
+                self._scan_state.update({
+                    "running": True,
+                    "phase": "running",
+                    "started_at": started_at,
+                    "last_status": "running",
+                    "last_event_at": datetime.now().isoformat(),
+                })
+            if (not previous_message) or previous_phase in {"completed", "failed", "idle"}:
+                self._scan_state["message"] = "后台处理中..."
+        elif self._scan_state.get("running") and self._scan_state.get("phase") == "running":
+            self._scan_state["running"] = False
+
         # 扫描运行中：把当前 source 的实时文件进度映射到 queue
         if self._scan_state.get("running") and self.harness:
             idx = self._scan_state.get("current_source_index", -1)
             if isinstance(idx, int) and 0 <= idx < len(queue):
                 try:
-                    live = self.harness.get_state()
                     baseline = self._scan_state.get("_source_baseline", {})
                     processed = max(0, int(live.get("processed_files", 0)) - int(baseline.get("processed_files", 0)))
                     failed = max(0, int(live.get("failed_files", 0)) - int(baseline.get("failed_files", 0)))
