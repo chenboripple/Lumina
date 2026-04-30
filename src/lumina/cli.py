@@ -546,15 +546,21 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
     if not targets:
         raise click.ClickException("没有可用的 input.sources 可启动服务。")
 
-    def run_target(target_path: Path, target_recursive: bool, target_filter: Optional[str] = None):
+    web = WebInterface(harness=harness, host=host, port=port, lumina_config=lumina_config)
+
+    def run_target(target_path: Path, target_recursive: bool, target_filter: Optional[str] = None, mode: str = "processing"):
         click.echo(f"🔄 处理: {target_path}")
-        return harness.run(str(target_path), recursive=target_recursive, file_filter=target_filter)
+        web.report_runtime_activity(str(target_path), mode=mode)
+        try:
+            return harness.run(str(target_path), recursive=target_recursive, file_filter=target_filter)
+        finally:
+            web.clear_runtime_activity(str(target_path))
 
     def run_initial_sync_in_background():
         click.echo("🚀 后台初始化同步开始...")
         for target_path, target_recursive, target_filter in targets:
             try:
-                run_target(target_path, target_recursive, target_filter)
+                run_target(target_path, target_recursive, target_filter, mode="initial_sync")
             except Exception as exc:
                 click.echo(f"❌ 初始化同步失败: {target_path} -> {exc}")
         click.echo("✅ 后台初始化同步完成")
@@ -584,7 +590,7 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
                 changed_path = Path(changed_file)
                 if changed_path.exists() and changed_path.is_file():
                     try:
-                        run_target(changed_path, False)
+                        run_target(changed_path, False, mode="incremental")
                     except Exception as exc:
                         click.echo(f"❌ 增量更新失败: {changed_path} -> {exc}")
 
@@ -604,7 +610,6 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
     click.echo(f"🌐 Lumina 常驻服务已启动: http://{host}:{port}")
     click.echo("💡 停止服务请按 Ctrl+C")
 
-    web = WebInterface(harness=harness, host=host, port=port, lumina_config=lumina_config)
     try:
         web.run(debug=False)
     finally:

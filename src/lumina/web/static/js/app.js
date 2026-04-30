@@ -208,17 +208,13 @@ function renderScanStatus(status) {
 
     const phase = status.phase || (status.running ? 'running' : 'idle');
     const lastStatus = status.last_status || phase;
-    const sourceCounts = status.source_counts || {};
     const fileCounts = status.file_counts || {};
     const queue = Array.isArray(status.queue) ? status.queue : [];
-    const progress = Number(status.progress_percent || 0);
     const currentSource = status.current_source || '';
     const running = Boolean(status.running);
     const message = status.message || (running ? '扫描中...' : '等待处理...');
     const lastCompletedAt = status.last_completed_at || status.last_event_at || '';
-    const etaSeconds = status.eta_seconds;
     const elapsedSeconds = Number(status.elapsed_seconds || 0);
-    const ratePerMinute = Number(status.rate_per_minute || 0);
     const failedItems = Array.isArray(status.failed_items) ? status.failed_items : [];
 
     if (!running && queue.length === 0) {
@@ -269,30 +265,6 @@ function renderScanStatus(status) {
         return;
     }
 
-    const queueHtml = queue.map((item, idx) => {
-        const itemProgress = Number(item.progress_percent || 0);
-        const itemStatus = item.status || 'pending';
-        const labelMap = {
-            pending: '待处理',
-            processing: '处理中',
-            completed: '已完成',
-            failed: '失败'
-        };
-        const label = labelMap[itemStatus] || itemStatus;
-        const sourceName = (item.source || `源 ${idx + 1}`).split('/').pop();
-
-        return `
-            <div class="queue-item ${itemStatus}">
-                <div class="queue-item-top">
-                    <span class="queue-source" title="${escapeHtml(item.source || '')}">${escapeHtml(sourceName)}</span>
-                    <span class="queue-badge ${itemStatus}">${label}</span>
-                </div>
-                <div class="queue-item-meta">${item.completed || 0}/${item.total_files || 0}（成功 ${item.processed || 0} / 失败 ${item.failed || 0}）</div>
-                <div class="queue-mini-progress"><span style="width:${Math.max(0, Math.min(100, itemProgress)).toFixed(1)}%"></span></div>
-            </div>
-        `;
-    }).join('');
-
     container.innerHTML = `
         <div class="queue-summary">
             <div class="queue-summary-top">
@@ -302,28 +274,8 @@ function renderScanStatus(status) {
                 </div>
                 <div class="queue-message">${escapeHtml(message)}</div>
             </div>
-            <div class="queue-progress-row">
-                <div class="queue-progress-bar">
-                    <span style="width:${Math.max(0, Math.min(100, progress)).toFixed(1)}%"></span>
-                </div>
-                <div class="queue-progress-text">${progress.toFixed(1)}%</div>
-            </div>
-            <div class="queue-counters">
-                <span>源文件队列: 待处理 ${sourceCounts.pending || 0}</span>
-                <span>处理中 ${sourceCounts.processing || 0}</span>
-                <span>已完成 ${sourceCounts.completed || 0}</span>
-                <span>失败 ${sourceCounts.failed || 0}</span>
-            </div>
-            <div class="queue-counters secondary">
-                <span>文件: 待处理 ${fileCounts.pending || 0}</span>
-                <span>已完成 ${fileCounts.completed || 0}</span>
-                <span>成功 ${fileCounts.processed || 0}</span>
-                <span>失败 ${fileCounts.failed || 0}</span>
-            </div>
             <div class="queue-counters tertiary">
-                <span>速度 ${ratePerMinute > 0 ? `${ratePerMinute.toFixed(1)} 项/分钟` : '计算中'}</span>
                 <span>已耗时 ${formatDuration(elapsedSeconds)}</span>
-                <span>预计剩余 ${etaSeconds == null ? '计算中' : formatDuration(etaSeconds)}</span>
             </div>
             ${currentSource ? `<div class="queue-current">当前: ${escapeHtml(currentSource)}</div>` : ''}
             ${failedItems.length ? `
@@ -331,9 +283,6 @@ function renderScanStatus(status) {
                     <button class="btn btn-secondary btn-sm" id="btn-view-failures">查看失败详情 (${failedItems.length})</button>
                 </div>
             ` : ''}
-        </div>
-        <div class="queue-list">
-            ${queueHtml || '<p class="hint">暂无队列项</p>'}
         </div>
     `;
 
