@@ -60,7 +60,7 @@ llm:
   model: gpt-4
 ```
 
-完整配置字段和说明见 [docs/lumina-yaml-demo.md](lumina-yaml-demo.md)。
+完整配置字段和说明见 [docs/deployment/config-reference.md](config-reference.md)。
 
 ## 验证安装
 

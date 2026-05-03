@@ -1031,23 +1031,31 @@ class SceneDetector:
 
 ## 提取要求
 1. 提炼核心概念与洞见
-2. 生成清晰的结构化摘要
-3. 识别可能关联的主题
-4. 推荐相关标签
-5. 评估内容复杂度与可信度
-6. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
+2. 生成清晰的结构化摘要，说明内容主题和价值
+3. 提取关键要点，要求具体，不要写成空泛标签
+4. 补充支撑细节，如例子、约束、数据、决策、依赖或实现线索
+5. 如果存在待推进事项，提炼为行动项
+6. 如果存在未解决问题、风险或争议，提炼出来
+7. 识别可能关联的主题
+8. 推荐相关标签
+9. 评估内容复杂度与可信度
+10. **语言要求**：使用与源内容相同的语言，源文为中文则全部用中文
 
 ## 输出格式
 返回如下 JSON 结构：
 {{
     "title": "简洁描述性标题",
-    "summary": "内容概述",
+    "summary": "2-4 句的内容概述，说明这份材料讲什么、为什么重要",
     "key_points": ["要点1", "要点2", "要点3"],
+    "supporting_details": ["支撑细节1", "支撑细节2"],
+    "action_items": ["行动项1", "行动项2"],
+    "open_questions": ["未决问题1", "风险2"],
     "tags": ["标签1", "标签2"],
     "suggested_links": ["关联主题A", "关联主题B"],
     "metadata": {{
         "complexity": "simple|moderate|complex",
         "confidence": 0.95,
+        "knowledge_density": "low|medium|high",
         "word_count": 150
     }}
 }}
@@ -1629,27 +1637,45 @@ class SceneDetector:
     
     def _format_generic_notes(self, data: Dict[str, Any]) -> str:
         lines = [f"# {data.get('title', '笔记')}\n"]
-        
+
         if data.get('summary'):
             lines.extend(["## 摘要\n", data['summary'] + "\n\n"])
-        
+
         if data.get('key_points'):
             lines.append("## 要点\n")
             for point in data['key_points']:
                 lines.append(f"- {point}\n")
             lines.append("\n")
-        
+
+        if data.get('supporting_details'):
+            lines.append("## 支撑细节\n")
+            for detail in data['supporting_details']:
+                lines.append(f"- {detail}\n")
+            lines.append("\n")
+
+        if data.get('action_items'):
+            lines.append("## 后续动作\n")
+            for item in data['action_items']:
+                lines.append(f"- [ ] {item}\n")
+            lines.append("\n")
+
+        if data.get('open_questions'):
+            lines.append("## 未决问题\n")
+            for question in data['open_questions']:
+                lines.append(f"- {question}\n")
+            lines.append("\n")
+
         if data.get('suggested_links'):
             lines.extend(["## 相关主题\n"])
             for link in data['suggested_links']:
                 lines.append(f"- {link}\n")
             lines.append("\n")
-        
+
         if data.get('tags'):
             lines.append("## 标签\n")
             tags_str = " ".join([f"#{tag}" for tag in data['tags']])
             lines.append(tags_str + "\n")
-        
+
         return "".join(lines)
 
     def _format_knowledge_essay(self, data: Dict[str, Any]) -> str:

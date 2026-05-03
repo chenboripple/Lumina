@@ -88,7 +88,7 @@ class Planner:
         'large': 1,   # 大文件（>1MB）
     }
     
-    # PARA 方法论分类目录（默认映射，可在 lumina.yaml output.categories 中覆盖）
+    # PARA 方法论分类目录（默认映射，可在 lumina.yaml output.note_organization.categories 中覆盖）
     # Projects: 有明确截止目标的临时项目
     # Areas:    需长期维护的责任/兴趣领域
     # Resources:仅供参考的资料，不承担责任
@@ -99,6 +99,8 @@ class Planner:
         "resources": "Resources",
         "archive":   "Archive",
     }
+    NOTE_ORGANIZATION_LEVELS = {"scene", "para"}
+    DEFAULT_NOTE_ORGANIZATION_LEVELS = ["scene", "para"]
 
     def __init__(
         self,
@@ -107,20 +109,21 @@ class Planner:
         llm_config: Dict[str, Any] = None,
         enable_clustering: bool = True,
         output_structure: Optional[Dict[str, bool]] = None,
-        categories: Optional[Dict[str, str]] = None,
-        scenes: Optional[List[Dict[str, Any]]] = None,
-        default_scene: str = "",
+        note_organization: Optional[Dict[str, Any]] = None,
     ):
         self.cache = cache_manager
         self.history = history_manager
         self.llm_config = llm_config or {}
         self.output_structure = output_structure or {"by_date": False, "by_type": False, "flat": False}
+        self.note_organization = self._normalize_note_organization(note_organization)
         # PARA 分类映射（用户可覆盖）
-        self.categories: Dict[str, str] = {**self.PARA_CATEGORY_MAP, **(categories or {})}
+        self.categories: Dict[str, str] = {
+            **self.PARA_CATEGORY_MAP,
+            **self.note_organization.get("categories", {}),
+        }
         # 生活场景列表：[{name: "工作", keywords: [...]}, ...]
-        # 空列表时直接使用单层 PARA
-        self.scenes: List[Dict[str, Any]] = scenes or []
-        self.default_scene: str = default_scene
+        self.scenes: List[Dict[str, Any]] = self.note_organization.get("scenes", [])
+        self.default_scene: str = self.note_organization.get("default_scene", "")
         
         # 初始化文档聚合器
         self.clusterer = DocumentClusterer() if enable_clustering else None
@@ -433,7 +436,8 @@ class Planner:
 
         for file_info in files:
             type_counts[file_info.type] = type_counts.get(file_info.type, 0) + 1
-            para = self._infer_para(file_info)
+            scene_ctx = self._infer_scene_context(file_info) if self.scenes else ""
+            para = self._infer_para(file_info, scene_ctx)
             para_counts[para] = para_counts.get(para, 0) + 1
             domain = self._infer_domain(file_info)
             domain_counts[domain] = domain_counts.get(domain, 0) + 1
@@ -524,8 +528,9 @@ class Planner:
     def _assign_note_structure(self, files: List[FileInfo]):
         """为每个文件规划 note_subdir。
 
-        配置了 scenes 时路径为：  {场景}/{PARA}
-        未配置 scenes 时路径为：  {PARA}
+        目录层级由 output.note_organization.levels 决定。
+        默认两层为：scene -> para。
+        若未配置 scenes，scene 层自动跳过。
         flat=true 时不分目录。
         """
         if not files:
@@ -537,12 +542,51 @@ class Planner:
             return
 
         for f in files:
-            para = self._infer_para(f)
-            if self.scenes:
-                scene_ctx = self._infer_scene_context(f)
-                f.metadata["note_subdir"] = f"{scene_ctx}/{para}"
-            else:
-                f.metadata["note_subdir"] = para
+            f.metadata["note_subdir"] = self._build_note_subdir(f)
+
+    def _normalize_note_organization(self, note_organization: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """标准化目录组织配置。"""
+        config = note_organization if isinstance(note_organization, dict) else {}
+
+        raw_levels = config.get("levels", [])
+        levels = [str(part).strip().lower() for part in raw_levels if str(part).strip()]
+        normalized_levels: List[str] = []
+        for level in levels:
+            if level in self.NOTE_ORGANIZATION_LEVELS and level not in normalized_levels:
+                normalized_levels.append(level)
+        if not normalized_levels:
+            normalized_levels = self.DEFAULT_NOTE_ORGANIZATION_LEVELS.copy()
+
+        raw_scenes = config.get("scenes", [])
+        scenes = raw_scenes if isinstance(raw_scenes, list) else []
+
+        raw_categories = config.get("categories", {})
+        categories = raw_categories if isinstance(raw_categories, dict) else {}
+
+        return {
+            "levels": normalized_levels[:2],
+            "default_scene": str(config.get("default_scene", "") or ""),
+            "scenes": scenes,
+            "categories": categories,
+        }
+
+    def _build_note_subdir(self, file_info: FileInfo) -> str:
+        """根据目录层级配置构建 note_subdir。"""
+        scene_ctx = self._infer_scene_context(file_info) if self.scenes else ""
+        para = self._infer_para(file_info, scene_ctx)
+
+        parts: List[str] = []
+        for level in self.note_organization.get("levels", self.DEFAULT_NOTE_ORGANIZATION_LEVELS):
+            if level == "scene" and scene_ctx:
+                parts.append(scene_ctx)
+            elif level == "para" and para:
+                parts.append(para)
+
+        # 保底仍输出 PARA，避免路径为空。
+        if not parts and para:
+            parts.append(para)
+
+        return "/".join(parts)
 
     def _infer_scene_context(self, file_info: FileInfo) -> str:
         """按用户配置的关键词列表匹配生活场景（第一层目录）。"""
@@ -557,8 +601,60 @@ class Planner:
             return self.default_scene
         return self.scenes[0]["name"] if self.scenes else ""
 
-    def _infer_para(self, file_info: FileInfo) -> str:
-        """按 PARA 方法论推断分类目录名。
+    def _get_scene_definition(self, scene_name: str) -> Dict[str, Any]:
+        if not scene_name:
+            return {}
+        for scene_def in self.scenes:
+            if str(scene_def.get("name", "")).strip() == scene_name:
+                return scene_def
+        return {}
+
+    def _apply_scene_para_policy(self, scene_name: str, para_key: str) -> str:
+        """按 scene 级别规则调整 PARA 键。"""
+        scene_def = self._get_scene_definition(scene_name)
+        if not scene_def:
+            return para_key
+
+        enabled_raw = scene_def.get("enabled_categories", [])
+        if not isinstance(enabled_raw, list) or not enabled_raw:
+            return para_key
+
+        enabled = [
+            str(item).strip().lower()
+            for item in enabled_raw
+            if str(item).strip().lower() in self.PARA_CATEGORY_MAP
+        ]
+        if not enabled:
+            return para_key
+
+        if para_key in enabled:
+            return para_key
+
+        fallback = str(scene_def.get("fallback_category", "")).strip().lower()
+        if fallback in enabled:
+            return fallback
+
+        if "resources" in enabled:
+            return "resources"
+        return enabled[0]
+
+    def _resolve_para_key(self, para_value: str) -> str:
+        value = str(para_value or "").strip()
+        if not value:
+            return ""
+
+        lowered = value.lower()
+        if lowered in self.categories:
+            return lowered
+
+        for key, label in self.categories.items():
+            if str(label).strip().lower() == lowered:
+                return key
+
+        return ""
+
+    def _infer_para_key(self, file_info: FileInfo) -> str:
+        """按 PARA 方法论推断分类键。
 
         优先级：
           1. metadata["para"] 显式标注
@@ -567,13 +663,13 @@ class Planner:
           4. 文件类型兜底 → Resources
         """
         # 1. 显式标注
-        para = file_info.metadata.get("para", "")
-        if para and para in self.categories:
-            return self.categories[para]
+        para = self._resolve_para_key(file_info.metadata.get("para", ""))
+        if para:
+            return para
 
         # 2. 集群文件 → Resources
         if file_info.type == "cluster":
-            return self.categories.get("resources", "Resources")
+            return "resources"
 
         text = f"{file_info.path.name} {file_info.path.stem}".lower()
 
@@ -582,7 +678,7 @@ class Planner:
             r"总结|归档|archive|旧版|已完成|复盘|年度|历史|obsolete|deprecated|_old|old_|backup",
             text
         ):
-            return self.categories.get("archive", "Archive")
+            return "archive"
 
         # 4. Projects：有明确截止目标的临时任务
         if re.search(
@@ -590,7 +686,7 @@ class Planner:
             r"|计划书|方案|proposal|prd\b|mrd\b|开发计划|排期|deadline",
             text
         ):
-            return self.categories.get("projects", "Projects")
+            return "projects"
 
         # 5. Areas：长期维护的责任/兴趣领域
         if re.search(
@@ -598,7 +694,7 @@ class Planner:
             r"|管理体系|sop\b|policy|日记|diary|journal|周报|月报",
             text
         ):
-            return self.categories.get("areas", "Areas")
+            return "areas"
 
         # 6. scene → PARA 映射
         scene = file_info.metadata.get("scene", "")
@@ -613,8 +709,12 @@ class Planner:
             "knowledge_essay":  "resources",
             "generic_notes":    "resources",
         }
-        para_key = scene_to_para.get(scene, "resources")
-        return self.categories.get(para_key, "Resources")
+        return scene_to_para.get(scene, "resources")
+
+    def _infer_para(self, file_info: FileInfo, scene_name: str = "") -> str:
+        para_key = self._infer_para_key(file_info)
+        para_key = self._apply_scene_para_policy(scene_name, para_key)
+        return self.categories.get(para_key, self.PARA_CATEGORY_MAP.get(para_key, "Resources"))
 
     def _sanitize_component(self, name: str) -> str:
         value = (name or "").strip().replace("\\", "/")

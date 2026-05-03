@@ -24,7 +24,7 @@ cd Lumina
 python install.py
 ```
 
-更多安装说明见 [docs/installation.md](/Users/ripple/work%20space/Lumina/docs/installation.md)。
+更多安装说明见 [docs/deployment/installation.md](docs/deployment/installation.md)。
 
 ## 配置
 
@@ -33,11 +33,11 @@ python install.py
 - `input.sources`：输入目录、递归策略、glob 过滤规则
 - `supported_extensions`：允许处理的扩展名
 - `output.base_dir` / `output.plugin`：输出目录和格式
-- `output.scenes` / `output.categories`：场景层和 PARA 目录映射
+- `output.note_organization`：统一管理 scene/PARA 层级、场景规则和分类映射
 - `harness.max_iterations` / `harness.quality_threshold`
 - `llm` 以及 `llm_planner` / `llm_executor` / `llm_validator`
 
-完整示例见 [docs/lumina-yaml-demo.md](/Users/ripple/work%20space/Lumina/docs/lumina-yaml-demo.md)。
+完整示例见 [docs/deployment/config-reference.md](docs/deployment/config-reference.md)。
 
 ## 使用
 
@@ -133,11 +133,12 @@ lumina stats
 
 ## 文档索引
 
-- [docs/start-here.md](/Users/ripple/work%20space/Lumina/docs/start-here.md)
-- [docs/usage/manual.md](/Users/ripple/work%20space/Lumina/docs/usage/manual.md)
-- [docs/advanced-features.md](/Users/ripple/work%20space/Lumina/docs/advanced-features.md)
-- [docs/architecture/planner.md](/Users/ripple/work%20space/Lumina/docs/architecture/planner.md)
-- [docs/architecture/harness.md](/Users/ripple/work%20space/Lumina/docs/architecture/harness.md)
+- [docs/index.md](docs/index.md)
+- [docs/user-guide/manual.md](docs/user-guide/manual.md)
+- [docs/product/features.md](docs/product/features.md)
+- [docs/design/architecture/planner.md](docs/design/architecture/planner.md)
+- [docs/design/architecture/harness.md](docs/design/architecture/harness.md)
+- [docs/deployment/installation.md](docs/deployment/installation.md)
 
 ## 开发与验证
 

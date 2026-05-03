@@ -132,13 +132,15 @@ class ObsidianPlugin(BasePlugin):
         related = self._clean_related(note.links)
         para = self._infer_para(note.metadata)
         hierarchical_tags = self._build_hierarchical_tags(note.tags, scene, para)
+        status = self._derive_status(note.metadata)
+        location_summary = self._build_location_summary(note.metadata, scene, para)
 
         lines = []
 
         # Frontmatter
         metadata = {
             "title": note.title,
-            "status": self._derive_status(note.metadata),
+            "status": status,
             "para": para,
             "aliases": self._build_aliases(note),
             "up": self._build_up_links(note, para),
@@ -147,11 +149,13 @@ class ObsidianPlugin(BasePlugin):
             "source": note.source,
             "lumina_score": note.metadata.get("score", 0),
             "lumina_scene": scene,
+            "lumina_note_subdir": str(note.metadata.get("note_subdir", "") or ""),
         }
         lines.append(self.frontmatter(metadata))
 
         callout_type = self.SCENE_CALLOUT_MAP.get(scene, "note")
-        lines.append(self._build_callout(callout_type, "Context", f"status: {metadata['status']} | para: {para}"))
+        lines.append(self._build_callout(callout_type, "Context", f"status: {status} | scene: {scene} | para: {para}"))
+        lines.append(self._build_callout("tip", "Organization", location_summary))
 
         # 内容
         lines.append(note.content)
@@ -226,6 +230,26 @@ class ObsidianPlugin(BasePlugin):
             up.append(f"Scene/{scene}")
         return up
 
+    def _build_location_summary(self, metadata: Dict[str, Any], scene: str, para: str) -> str:
+        note_subdir = str(metadata.get("note_subdir", "") or "").strip("/")
+        lines = []
+        if note_subdir:
+            lines.append(f"path: {note_subdir}")
+        if scene:
+            lines.append(f"scene: {scene}")
+        if para:
+            lines.append(f"para: {para}")
+
+        parts = [part for part in note_subdir.split("/") if part]
+        if parts:
+            lines.append(f"levels: {' -> '.join(parts)}")
+
+        confidence = metadata.get("confidence")
+        if confidence not in (None, ""):
+            lines.append(f"confidence: {confidence}")
+
+        return "\n".join(lines) or "path: root"
+
     def _clean_related(self, links: List[str]) -> List[str]:
         cleaned = []
         seen = set()
@@ -291,13 +315,27 @@ class PlainMarkdownPlugin(BasePlugin):
     display_name = "Plain Markdown"
     
     def format(self, note: NoteData) -> str:
+        scene = str(note.metadata.get("scene", "")).strip()
+        para = str(note.metadata.get("para", "")).strip()
+        note_subdir = str(note.metadata.get("note_subdir", "") or "").strip("/")
+
         lines = [
             f"# {note.title}",
             "",
             f"*Source: {note.source}*",
             "",
-            note.content,
         ]
+
+        if note_subdir or scene or para:
+            lines.extend([
+                "## Organization",
+                f"- Path: {note_subdir or 'root'}",
+                f"- Scene: {scene or 'n/a'}",
+                f"- PARA: {para or 'n/a'}",
+                "",
+            ])
+
+        lines.append(note.content)
         
         if note.tags:
             lines.append(f"\nTags: {self.tag_syntax(note.tags)}")

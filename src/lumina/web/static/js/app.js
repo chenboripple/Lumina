@@ -644,7 +644,7 @@ function displaySearchResults(data) {
     }
 
     container.innerHTML = data.results.map(result => `
-        <div class="search-result" data-id="${result.id}">
+        <div class="search-result" data-id="${encodeURIComponent(result.id || '')}" data-source="${encodeURIComponent(result.source || '')}">
             <div class="result-title">${escapeHtml(result.title)}</div>
             <div class="result-preview">${escapeHtml(result.content_preview)}</div>
             <div class="result-meta">
@@ -656,7 +656,11 @@ function displaySearchResults(data) {
     `).join('');
 
     container.querySelectorAll('.search-result').forEach(el => {
-        el.addEventListener('click', () => openNoteDetail(el.dataset.id));
+        el.addEventListener('click', () => {
+            const noteId = decodeURIComponent(el.dataset.id || '');
+            const sourcePath = decodeURIComponent(el.dataset.source || '');
+            openNoteDetail(noteId, sourcePath);
+        });
     });
 }
 
@@ -784,11 +788,49 @@ async function loadNotes() {
     }
 }
 
-async function openNoteDetail(noteId) {
+function buildNoteDetailUrl(noteId) {
+    const normalizedId = String(noteId || '').replace(/\\/g, '/');
+    const encodedPath = normalizedId
+        .split('/')
+        .filter(segment => segment.length > 0)
+        .map(segment => encodeURIComponent(segment))
+        .join('/');
+    return `/api/notes/${encodedPath}`;
+}
+
+async function openNoteDetail(noteId, sourcePath = '') {
     showLoading(true);
 
     try {
-        const note = await apiRequest(`/api/notes/${encodeURIComponent(noteId)}`);
+        let note = null;
+        let resolvedNoteId = noteId;
+        let lastError = null;
+
+        if (sourcePath) {
+            try {
+                note = await apiRequest(`/api/notes/by-source?source=${encodeURIComponent(sourcePath)}`);
+                resolvedNoteId = note.id || resolvedNoteId;
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        if (!note && noteId) {
+            try {
+                note = await apiRequest(buildNoteDetailUrl(noteId));
+            } catch (error) {
+                lastError = error;
+            }
+        }
+
+        if (!note) {
+            const sourceCandidate = sourcePath || noteId;
+            if (!sourceCandidate) {
+                throw lastError || new Error('Note identifier is required');
+            }
+            note = await apiRequest(`/api/notes/by-source?source=${encodeURIComponent(sourceCandidate)}`);
+            resolvedNoteId = note.id || resolvedNoteId;
+        }
 
         document.getElementById('modal-title').textContent = note.title || '笔记详情';
         document.getElementById('modal-body').innerHTML = `
@@ -809,7 +851,7 @@ async function openNoteDetail(noteId) {
         `;
 
         modal.classList.remove('hidden');
-        modal.dataset.noteId = noteId;
+        modal.dataset.noteId = resolvedNoteId;
         modal.dataset.sourcePath = note.source_path || '';
 
     } catch (error) {
@@ -897,73 +939,247 @@ async function loadConfig() {
 
     try {
         const config = await apiRequest('/api/config');
+        const systemCfg = config.system_config || {};
+        const fixedCfg = systemCfg.fixed || {};
+        const runtimeCfg = systemCfg.runtime || {};
+        const serviceCfg = systemCfg.service || {};
+        const currentSnapshot = config.current_snapshot || {};
+        const rawUserConfig = config.raw_user_config || '';
+        const agentCfg = (config.agent_config || {}).user_defined || {};
+        const harnessCfg = currentSnapshot.harness || agentCfg.harness || {};
+        const inputPref = currentSnapshot.input || (config.user_preferences || {}).input || {};
+        const outputPref = currentSnapshot.output || (config.user_preferences || {}).output || {};
+        const llmShared = currentSnapshot.llm || agentCfg.llm_shared || {};
+        const llmPlanner = currentSnapshot.llm_planner || agentCfg.llm_planner || {};
+        const llmExecutor = currentSnapshot.llm_executor || agentCfg.llm_executor || {};
+        const llmValidator = currentSnapshot.llm_validator || agentCfg.llm_validator || {};
 
         container.innerHTML = `
-            <form id="config-update-form">
-                <div class="form-group">
-                    <label class="form-label">最大迭代次数</label>
-                    <input type="number" class="form-input" name="max_iterations"
-                           value="${config.max_iterations}" min="1" max="10">
+            <form id="config-update-form" class="config-sections">
+                <section class="config-section">
+                    <h3>当前已配置内容</h3>
+                    <p class="hint">这里可以直接看到并编辑当前的用户配置文件；分组输入框也会直接预填当前生效值。</p>
+                    <div class="config-grid-2">
+                        <div class="config-card readonly">
+                            <div class="form-label">当前生效配置快照</div>
+                            <pre class="json-preview config-tall-preview">${escapeHtml(JSON.stringify(currentSnapshot, null, 2))}</pre>
+                        </div>
+                        <div class="config-card">
+                            <div class="form-label">用户配置文件原文（YAML，可直接编辑）</div>
+                            <textarea class="form-input json-input config-tall-preview" id="cfg-raw-user-config">${escapeHtml(rawUserConfig || '# 当前无配置文件内容')}</textarea>
+                            <div class="config-actions inline-top-gap">
+                                <button type="button" class="btn btn-secondary" id="btn-save-raw-config">保存 YAML 配置</button>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="config-section">
+                    <h3>系统配置（固定/运行态）</h3>
+                                <textarea class="form-input json-input" id="cfg-llm-shared" rows="8">${escapeHtml(JSON.stringify(llmShared || {}, null, 2))}</textarea>
+                    <div class="config-grid-2">
+                        <div class="config-card readonly">
+                            <div class="form-label">Schema 版本</div>
+                                <textarea class="form-input json-input" id="cfg-llm-planner" rows="5">${escapeHtml(JSON.stringify(llmPlanner || {}, null, 2))}</textarea>
+                            <div class="form-label">支持 Agents</div>
+                            <div class="readonly-value">${escapeHtml((fixedCfg.supported_agents || []).join(', ') || '-')}</div>
+                            <div class="form-label">Planner 默认 PARA</div>
+                                <textarea class="form-input json-input" id="cfg-llm-executor" rows="5">${escapeHtml(JSON.stringify(llmExecutor || {}, null, 2))}</textarea>
+                        </div>
+                        <div class="config-card readonly">
+                            <div class="form-label">运行状态</div>
+                                <textarea class="form-input json-input" id="cfg-llm-validator" rows="5">${escapeHtml(JSON.stringify(llmValidator || {}, null, 2))}</textarea>
+                            <div class="form-label">当前会话</div>
+                            <div class="readonly-value">${escapeHtml(runtimeCfg.session_id || '-')}</div>
+                            <div class="form-label">当前输出目录</div>
+                            <div class="readonly-value">${escapeHtml(runtimeCfg.output_dir || '-')}</div>
+                            <div class="form-group">
+                                <label class="form-label">日志保留天数</label>
+                                <input type="number" class="form-input" id="cfg-log-retention-days" min="0" value="${Number(serviceCfg.log_retention_days ?? 15)}">
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="config-section">
+                    <h3>Agent 配置（可调）</h3>
+                    <div class="config-grid-2">
+                        <div class="config-card">
+                            <div class="form-group">
+                                <label class="form-label">Harness 最大迭代次数</label>
+                                <input type="number" class="form-input" id="cfg-max-iterations" min="1" max="10" value="${Number(harnessCfg.max_iterations ?? 3)}">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Harness 质量阈值</label>
+                                <input type="number" class="form-input" id="cfg-quality-threshold" min="0" max="1" step="0.05" value="${Number(harnessCfg.quality_threshold ?? 0.8)}">
+                            </div>
+                            <div class="form-group form-checkbox">
+                                <input type="checkbox" id="cfg-incremental" ${harnessCfg.incremental ? 'checked' : ''}>
+                                <label for="cfg-incremental">增量处理</label>
+                            </div>
+                            <div class="form-group form-checkbox">
+                                <input type="checkbox" id="cfg-parallel" ${harnessCfg.parallel ? 'checked' : ''}>
+                                <label for="cfg-parallel">并行处理</label>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">并行 worker 数</label>
+                                <input type="number" class="form-input" id="cfg-max-workers" min="1" max="32" value="${Number(harnessCfg.max_workers ?? 4)}">
+                            </div>
+                            <div class="form-group form-checkbox">
+                                <input type="checkbox" id="cfg-enable-vector-store" ${harnessCfg.enable_vector_store ? 'checked' : ''}>
+                                <label for="cfg-enable-vector-store">启用向量存储</label>
+                            </div>
+                        </div>
+                        <div class="config-card">
+                            <div class="form-group">
+                                <label class="form-label">共享 LLM 配置（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-llm-shared" rows="8">${escapeHtml(JSON.stringify(agentCfg.llm_shared || {}, null, 2))}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Planner LLM 覆盖（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-llm-planner" rows="5">${escapeHtml(JSON.stringify(agentCfg.llm_planner || {}, null, 2))}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Executor LLM 覆盖（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-llm-executor" rows="5">${escapeHtml(JSON.stringify(agentCfg.llm_executor || {}, null, 2))}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Validator LLM 覆盖（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-llm-validator" rows="5">${escapeHtml(JSON.stringify(agentCfg.llm_validator || {}, null, 2))}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="config-section">
+                    <h3>用户个性化配置</h3>
+                    <div class="config-grid-2">
+                        <div class="config-card">
+                            <div class="form-group form-checkbox">
+                                <input type="checkbox" id="cfg-default-recursive" ${inputPref.default_recursive ? 'checked' : ''}>
+                                <label for="cfg-default-recursive">输入源默认递归</label>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">支持扩展名（JSON 数组）</label>
+                                <textarea class="form-input json-input" id="cfg-supported-extensions" rows="4">${escapeHtml(JSON.stringify(inputPref.supported_extensions || [], null, 2))}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">输入源列表（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-input-sources" rows="8">${escapeHtml(JSON.stringify(inputPref.sources || [], null, 2))}</textarea>
+                            </div>
+                        </div>
+                        <div class="config-card">
+                            <div class="form-group">
+                                <label class="form-label">输出插件</label>
+                                <select class="form-input" id="cfg-output-plugin">
+                                    <option value="obsidian" ${outputPref.plugin === 'obsidian' ? 'selected' : ''}>Obsidian</option>
+                                    <option value="plain" ${outputPref.plugin === 'plain' ? 'selected' : ''}>Plain Markdown</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">输出目录</label>
+                                <input type="text" class="form-input" id="cfg-output-base-dir" value="${escapeHtml(outputPref.base_dir || '')}">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Vault 路径</label>
+                                <input type="text" class="form-input" id="cfg-output-vault-path" value="${escapeHtml(outputPref.vault_path || '')}">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">输出结构（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-output-structure" rows="4">${escapeHtml(JSON.stringify(outputPref.structure || {}, null, 2))}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">命名规则（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-output-naming" rows="4">${escapeHtml(JSON.stringify(outputPref.naming || {}, null, 2))}</textarea>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">笔记组织规则（JSON）</label>
+                                <textarea class="form-input json-input" id="cfg-note-organization" rows="10">${escapeHtml(JSON.stringify(outputPref.note_organization || {}, null, 2))}</textarea>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <div class="config-actions">
+                    <button type="submit" class="btn btn-primary">保存全部配置</button>
                 </div>
-                <div class="form-group">
-                    <label class="form-label">质量阈值</label>
-                    <input type="number" class="form-input" name="quality_threshold"
-                           value="${config.quality_threshold}" min="0" max="1" step="0.1">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">输出目录</label>
-                    <input type="text" class="form-input" name="output_dir"
-                           value="${config.output_dir}">
-                </div>
-                <div class="form-group">
-                    <label class="form-label">插件</label>
-                    <select class="form-input" name="plugin">
-                        <option value="obsidian" ${config.plugin === 'obsidian' ? 'selected' : ''}>Obsidian</option>
-                        <option value="plain" ${config.plugin === 'plain' ? 'selected' : ''}>Plain Markdown</option>
-                    </select>
-                </div>
-                <div class="form-group form-checkbox">
-                    <input type="checkbox" id="incremental" name="incremental"
-                           ${config.incremental ? 'checked' : ''}>
-                    <label for="incremental">增量处理</label>
-                </div>
-                <div class="form-group form-checkbox">
-                    <input type="checkbox" id="parallel" name="parallel"
-                           ${config.parallel ? 'checked' : ''}>
-                    <label for="parallel">并行处理</label>
-                </div>
-                <div class="form-group form-checkbox">
-                    <input type="checkbox" id="enable_vector_store" name="enable_vector_store"
-                           ${config.enable_vector_store ? 'checked' : ''}>
-                    <label for="enable_vector_store">启用向量存储</label>
-                </div>
-                <button type="submit" class="btn btn-primary">保存配置</button>
             </form>
         `;
 
         document.getElementById('config-update-form').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const formData = new FormData(e.target);
-            const newConfig = {};
 
-            formData.forEach((value, key) => {
-                if (value === 'on') {
-                    newConfig[key] = true;
-                } else if (!isNaN(value) && value !== '') {
-                    newConfig[key] = Number(value);
-                } else {
-                    newConfig[key] = value;
-                }
-            });
+            const parseJson = (id, fallback) => {
+                const raw = (document.getElementById(id)?.value || '').trim();
+                if (!raw) return fallback;
+                return JSON.parse(raw);
+            };
 
+            try {
+                const payload = {
+                    system_config: {
+                        service: {
+                            log_retention_days: Number(document.getElementById('cfg-log-retention-days').value || 15)
+                        }
+                    },
+                    agent_config: {
+                        user_defined: {
+                            harness: {
+                                max_iterations: Number(document.getElementById('cfg-max-iterations').value || 3),
+                                quality_threshold: Number(document.getElementById('cfg-quality-threshold').value || 0.8),
+                                incremental: document.getElementById('cfg-incremental').checked,
+                                parallel: document.getElementById('cfg-parallel').checked,
+                                max_workers: Number(document.getElementById('cfg-max-workers').value || 4),
+                                enable_vector_store: document.getElementById('cfg-enable-vector-store').checked,
+                            },
+                            llm_shared: parseJson('cfg-llm-shared', {}),
+                            llm_planner: parseJson('cfg-llm-planner', {}),
+                            llm_executor: parseJson('cfg-llm-executor', {}),
+                            llm_validator: parseJson('cfg-llm-validator', {}),
+                        }
+                    },
+                    user_preferences: {
+                        input: {
+                            default_recursive: document.getElementById('cfg-default-recursive').checked,
+                            supported_extensions: parseJson('cfg-supported-extensions', []),
+                            sources: parseJson('cfg-input-sources', []),
+                        },
+                        output: {
+                            plugin: document.getElementById('cfg-output-plugin').value,
+                            base_dir: document.getElementById('cfg-output-base-dir').value,
+                            vault_path: document.getElementById('cfg-output-vault-path').value,
+                            structure: parseJson('cfg-output-structure', {}),
+                            naming: parseJson('cfg-output-naming', {}),
+                            note_organization: parseJson('cfg-note-organization', {}),
+                        }
+                    }
+                };
+
+                await apiRequest('/api/config', {
+                    method: 'POST',
+                    body: JSON.stringify(payload)
+                });
+
+                showToast('配置已保存并热更新');
+                await loadConfig();
+            } catch (error) {
+                console.error('Config save failed:', error);
+                showToast('保存配置失败，请检查 JSON 格式', 'error');
+            }
+        });
+
+        document.getElementById('btn-save-raw-config').addEventListener('click', async () => {
+            const rawText = document.getElementById('cfg-raw-user-config').value;
             try {
                 await apiRequest('/api/config', {
                     method: 'POST',
-                    body: JSON.stringify(newConfig)
+                    body: JSON.stringify({ raw_user_config: rawText })
                 });
-                showToast('配置已保存！');
+                showToast('YAML 配置已保存并重新加载');
+                await loadConfig();
             } catch (error) {
-                showToast('保存配置失败', 'error');
+                console.error('Raw config save failed:', error);
+                showToast('YAML 配置保存失败，请检查格式', 'error');
             }
         });
 

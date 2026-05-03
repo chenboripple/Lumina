@@ -57,9 +57,7 @@ class HarnessConfig:
     enable_vector_store: bool = True
     supported_extensions: List[str] = field(default_factory=list)
     output_structure: Dict[str, bool] = field(default_factory=dict)
-    categories: Dict[str, str] = field(default_factory=dict)
-    scenes: List[Dict[str, Any]] = field(default_factory=list)
-    default_scene: str = ""
+    note_organization: Dict[str, Any] = field(default_factory=dict)
     enable_clustering: bool = True
     enable_content_filter: bool = True
     enable_scene_detection: bool = True
@@ -199,7 +197,7 @@ Harness 会先补全 metadata，例如：
 
 ## 相关文件
 
-- [src/lumina/harness.py](/Users/ripple/work%20space/Lumina/src/lumina/harness.py)
-- [src/lumina/executor.py](/Users/ripple/work%20space/Lumina/src/lumina/executor.py)
-- [src/lumina/planner.py](/Users/ripple/work%20space/Lumina/src/lumina/planner.py)
-- [src/lumina/plugins.py](/Users/ripple/work%20space/Lumina/src/lumina/plugins.py)
+- [src/lumina/harness.py](../../../src/lumina/harness.py)
+- [src/lumina/executor.py](../../../src/lumina/executor.py)
+- [src/lumina/planner.py](../../../src/lumina/planner.py)
+- [src/lumina/plugins.py](../../../src/lumina/plugins.py)

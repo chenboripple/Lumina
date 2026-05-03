@@ -6,10 +6,10 @@
 
 核心文件：
 
-- [src/lumina/web_interface.py](/Users/ripple/work%20space/Lumina/src/lumina/web_interface.py)
-- [src/lumina/web/templates/dashboard.html](/Users/ripple/work%20space/Lumina/src/lumina/web/templates/dashboard.html)
-- [src/lumina/web/static/js/app.js](/Users/ripple/work%20space/Lumina/src/lumina/web/static/js/app.js)
-- [src/lumina/web/static/css/style.css](/Users/ripple/work%20space/Lumina/src/lumina/web/static/css/style.css)
+- [src/lumina/web_interface.py](../../src/lumina/web_interface.py)
+- [src/lumina/web/templates/dashboard.html](../../src/lumina/web/templates/dashboard.html)
+- [src/lumina/web/static/js/app.js](../../src/lumina/web/static/js/app.js)
+- [src/lumina/web/static/css/style.css](../../src/lumina/web/static/css/style.css)
 
 ### 当前可用能力
 
@@ -74,7 +74,7 @@
 
 ## 3. 场景模板扩展
 
-文档场景检测与模板位于 [src/lumina/scene_detector.py](/Users/ripple/work%20space/Lumina/src/lumina/scene_detector.py)。
+文档场景检测与模板位于 [src/lumina/scene_detector.py](../../src/lumina/scene_detector.py)。
 
 当前内置场景包括：
 
@@ -95,14 +95,14 @@
 - `knowledge_essay`
 - `generic_notes`
 
-说明：这里的“文档场景”是 Executor 用来选择提取模板和输出格式的能力；它和 `output.scenes` 的目录分层不是同一件事。
+说明：这里的“文档场景”是 Executor 用来选择提取模板和输出格式的能力；它和 `output.note_organization.scenes` 的目录分层不是同一件事。
 
 ## 4. 内容过滤与内容策略
 
 核心文件：
 
-- [src/lumina/content_filter.py](/Users/ripple/work%20space/Lumina/src/lumina/content_filter.py)
-- [src/lumina/executor.py](/Users/ripple/work%20space/Lumina/src/lumina/executor.py)
+- [src/lumina/content_filter.py](../../src/lumina/content_filter.py)
+- [src/lumina/executor.py](../../src/lumina/executor.py)
 
 当前已落地的策略包括：
 
@@ -120,9 +120,9 @@
 
 核心文件：
 
-- [src/lumina/document_cluster.py](/Users/ripple/work%20space/Lumina/src/lumina/document_cluster.py)
-- [src/lumina/planner.py](/Users/ripple/work%20space/Lumina/src/lumina/planner.py)
-- [src/lumina/harness.py](/Users/ripple/work%20space/Lumina/src/lumina/harness.py)
+- [src/lumina/document_cluster.py](../../src/lumina/document_cluster.py)
+- [src/lumina/planner.py](../../src/lumina/planner.py)
+- [src/lumina/harness.py](../../src/lumina/harness.py)
 
 当前聚合能力：
 
@@ -137,7 +137,7 @@
 
 核心文件：
 
-- [src/lumina/plugins.py](/Users/ripple/work%20space/Lumina/src/lumina/plugins.py)
+- [src/lumina/plugins.py](../../src/lumina/plugins.py)
 
 当前 Obsidian 输出增强包括：
 
