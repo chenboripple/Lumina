@@ -81,6 +81,11 @@ class HarnessConfig:
     enable_sensitive_content_check: bool = True  # 是否启用敏感内容检测
     backup_before_write: bool = True  # 写入前是否自动备份原始文件
     
+    # 内容预分析配置
+    enable_content_analyzer: bool = True  # 是否启用内容预分析
+    llm_config_analyzer: Optional[Dict[str, Any]] = None  # 分析器专用 LLM 配置（轻量模型）
+    content_analyzer_max_length: int = 3000  # 分析器读取内容最大长度
+    
     def get_llm_config_for(self, agent_name: str) -> Dict[str, Any]:
         """获取指定 Agent 的 LLM 配置
         
@@ -175,6 +180,15 @@ class Harness:
             history_manager=self.history,
             llm_config=self.config.get_llm_config_for('validator')
         )
+        
+        # 初始化内容预分析器
+        self.content_analyzer = None
+        if self.config.enable_content_analyzer:
+            self.content_analyzer = ContentAnalyzer(
+                llm_config=self.config.get_llm_config_for('analyzer'),
+                cache_manager=self.cache,
+                max_content_length=self.config.content_analyzer_max_length
+            )
         
         # 初始化插件
         self.plugin = get_plugin(self.config.plugin)
@@ -372,12 +386,33 @@ class Harness:
                 self._log("✅ No files need processing, exiting")
                 return self._generate_final_report([])
             
-            # 生成处理计划
+            # Phase 1.5: 内容预分析（可选，用于智能过滤和合并）
+            content_briefs = None
+            if self.config.enable_content_analyzer and self.content_analyzer:
+                self._log("\n🔍 Phase 1.5: Content Analysis (lightweight LLM)")
+                if self.progress_tracker:
+                    self.progress_tracker.set_phase("content_analysis")
+                
+                brief_result = self.content_analyzer.analyze_batch(files)
+                content_briefs = brief_result.briefs
+                
+                # 记录统计
+                self._log(f"📊 Analysis complete: {brief_result.cache_hits} cache hits, "
+                         f"{brief_result.cache_misses} new analyses")
+                self._log(f"💰 Analysis cost: ${brief_result.total_cost:.4f} ({brief_result.total_tokens} tokens)")
+                
+                # 显示过滤和合并建议
+                skip_count = sum(1 for b in content_briefs if b.suggested_action == "skip")
+                merge_count = sum(1 for b in content_briefs if b.suggested_action == "merge")
+                self._log(f"🎯 Suggestions: {skip_count} skip, {merge_count} merge, "
+                         f"{len(content_briefs) - skip_count - merge_count} process")
+            
+            # 生成处理计划（传入内容简述）
             if self.progress_tracker:
                 self.progress_tracker.set_phase("planning")
             
             existing_notes = self._collect_existing_notes() if self.config.enable_clustering else None
-            plan = self.planner.plan(files, existing_notes=existing_notes)
+            plan = self.planner.plan(files, existing_notes=existing_notes, content_briefs=content_briefs)
             self._log(f"🎯 Processing strategy: {plan.strategy}")
             self._log(f"📦 Total batches: {len(plan.batches)}")
             
@@ -401,9 +436,23 @@ class Harness:
                     self.progress_tracker.set_phase("recording_history")
                 self._record_history(results)
             
-            # 生成最终报告
+            # 生成最终报告（包含分析器统计）
             self.state.status = "completed"
             final_report = self._generate_final_report(results)
+            
+            # 添加内容分析统计
+            if content_briefs:
+                final_report["content_analysis"] = {
+                    "total_analyzed": len(content_briefs),
+                    "cache_hits": brief_result.cache_hits,
+                    "cache_misses": brief_result.cache_misses,
+                    "total_tokens": brief_result.total_tokens,
+                    "total_cost": brief_result.total_cost,
+                    "duration": brief_result.duration,
+                    "suggested_skips": sum(1 for b in content_briefs if b.suggested_action == "skip"),
+                    "suggested_merges": sum(1 for b in content_briefs if b.suggested_action == "merge"),
+                }
+            
             self._log_final_results(final_report)
             
             return final_report

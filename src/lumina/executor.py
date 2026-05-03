@@ -456,10 +456,19 @@ class Executor:
         return self.PROMPT_TEMPLATES.get(file_info.type, "default")
     
     def _build_scene_prompt(self, template, file_info, content: str, context: ExecutionContext) -> str:
-        """构建场景化单块提示词"""
+        """构建场景化单块提示词（支持预分析简述注入）"""
         guidance = file_info.metadata.get("content_guidance", "")
         if guidance:
             content = f"[Extraction Guidance]\n{guidance}\n\n{content}"
+        
+        # 检查是否有预分析的简述信息
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        brief_injection = ""
+        if brief_summary:
+            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
+            # 在内容前注入简述
+            content = brief_injection + content
+        
         return template.prompt_template.format(
             filename=file_info.path.name,
             file_type=file_info.type,
@@ -467,14 +476,22 @@ class Executor:
         )
     
     def _build_scene_prompt_chunked(self, template, file_info, chunks: List[str], context: ExecutionContext) -> str:
-        """构建场景化分块提示词"""
+        """构建场景化分块提示词（支持预分析简述注入）"""
         guidance = file_info.metadata.get("content_guidance", "")
+        # 检查是否有预分析的简述信息
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        brief_injection = ""
+        if brief_summary:
+            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
+        
         chunks_text = "\n\n".join([
             f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
             for i, chunk in enumerate(chunks)
         ])
         if guidance:
-            chunks_text = f"[Extraction Guidance]\n{guidance}\n\n{chunks_text}"
+            chunks_text = f"[Extraction Guidance]\n{guidance}\n\n{brief_injection}{chunks_text}"
+        elif brief_injection:
+            chunks_text = brief_injection + chunks_text
         
         # 在模板中替换内容部分
         prompt = template.prompt_template.format(
@@ -534,10 +551,16 @@ class Executor:
             )
     
     def _build_prompt_single(self, file_info, content: str, context: ExecutionContext) -> str:
-        """构建单块提示词"""
+        """构建单块提示词（支持预分析简述注入）"""
         strategy = self._select_prompt_strategy(file_info)
         guidance = file_info.metadata.get("content_guidance", "")
         guidance_block = f"6. {guidance}\n" if guidance else ""
+        
+        # 检查是否有预分析的简述信息
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        brief_injection = ""
+        if brief_summary:
+            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
         
         return f"""You are a knowledge extraction expert. Analyze the following content and generate a structured note.
 
@@ -546,7 +569,7 @@ class Executor:
 - Type: {file_info.type}
 - Size: {file_info.size} bytes
 - Strategy: {strategy}
-
+{brief_injection}
 ## Content
 ```
 {content[:self.CHUNK_SIZE]}
@@ -586,13 +609,22 @@ Return JSON with this structure:
 """
     
     def _build_prompt_chunked(self, file_info, chunks: List[str], context: ExecutionContext) -> str:
-        """构建分块提示词"""
+        """构建分块提示词（支持预分析简述注入）"""
         guidance = file_info.metadata.get("content_guidance", "")
         guidance_block = f"7. {guidance}\n" if guidance else ""
+        
+        # 检查是否有预分析的简述信息
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        brief_injection = ""
+        if brief_summary:
+            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
+        
         chunks_text = "\n\n".join([
             f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
             for i, chunk in enumerate(chunks)
         ])
+        if brief_injection:
+            chunks_text = brief_injection + chunks_text
         
         return f"""You are a knowledge extraction expert. This is a large document split into {len(chunks)} parts. Analyze all parts and generate a comprehensive structured note.
 
