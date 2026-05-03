@@ -24,6 +24,10 @@ except ImportError:
 
 
 from .planner import Planner
+from .executor import Executor
+from .validator import Validator
+from .plugins import get_plugin
+from .config_core import LuminaConfig, USER_CONFIG_FILE
 
 
 class WebInterface:
@@ -223,6 +227,66 @@ class WebInterface:
                     "tags": metadata.get('tags', []),
                     "links": metadata.get('links', [])
                 })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 按源文件路径获取笔记
+        @self.app.route('/api/notes/by-source')
+        def api_note_detail_by_source():
+            """按 source 路径查找并返回笔记详情。"""
+            try:
+                source_path = (request.args.get('source') or '').strip()
+                if not source_path:
+                    return jsonify({"error": "source query is required"}), 400
+
+                output_dir = Path(self.harness.config.output_dir) if self.harness else Path("./output")
+                if not output_dir.exists():
+                    return jsonify({"error": "Note not found"}), 404
+
+                source_normalized = str(Path(source_path).expanduser().resolve())
+
+                for md_file in output_dir.rglob("*.md"):
+                    try:
+                        content = md_file.read_text(encoding='utf-8')
+                    except Exception:
+                        continue
+
+                    metadata = {}
+                    body = content
+                    if content.startswith('---'):
+                        parts = content.split('---', 2)
+                        if len(parts) >= 3:
+                            try:
+                                import yaml
+                                metadata = yaml.safe_load(parts[1]) or {}
+                                body = parts[2].strip()
+                            except Exception:
+                                metadata = {}
+
+                    candidate_source = str(metadata.get('source', '')).strip()
+                    if not candidate_source:
+                        continue
+
+                    try:
+                        candidate_normalized = str(Path(candidate_source).expanduser().resolve())
+                    except Exception:
+                        candidate_normalized = candidate_source
+
+                    if candidate_normalized != source_normalized:
+                        continue
+
+                    note_id = str(md_file.relative_to(output_dir))
+                    return jsonify({
+                        "id": note_id,
+                        "title": metadata.get('title', md_file.stem),
+                        "content": body,
+                        "metadata": metadata,
+                        "source_path": metadata.get('source'),
+                        "tags": metadata.get('tags', []),
+                        "links": metadata.get('links', [])
+                    })
+
+                return jsonify({"error": "Note not found"}), 404
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
         
@@ -560,24 +624,17 @@ class WebInterface:
         def api_config():
             """获取/更新配置"""
             if request.method == 'GET':
-                if not self.harness:
-                    return jsonify({"error": "Harness not available"}), 503
-                
-                config = {
-                    "max_iterations": self.harness.config.max_iterations,
-                    "quality_threshold": self.harness.config.quality_threshold,
-                    "output_dir": self.harness.config.output_dir,
-                    "plugin": self.harness.config.plugin,
-                    "incremental": self.harness.config.incremental,
-                    "parallel": self.harness.config.parallel,
-                    "enable_vector_store": self.harness.config.enable_vector_store,
-                }
-                return jsonify(config)
+                return jsonify(self._build_grouped_config_response())
             
             else:  # POST
-                data = request.get_json()
-                # 更新配置（需要实现配置热加载）
-                return jsonify({"message": "Config updated", "changes": data})
+                data = request.get_json() or {}
+                try:
+                    applied = self._apply_grouped_config_updates(data)
+                    return jsonify({"message": "Config updated", "changes": applied})
+                except ValueError as exc:
+                    return jsonify({"error": str(exc)}), 400
+                except Exception as exc:
+                    return jsonify({"error": str(exc)}), 500
         
         # API: 处理状态
         @self.app.route('/api/status')
@@ -667,6 +724,328 @@ class WebInterface:
             "source": str(source_file),
             "message": "Note regenerated successfully" if result.get("success") else "Failed to regenerate",
         }
+
+    def _sanitize_llm_config(self, config: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        cfg = dict(config or {})
+        cfg.pop("api_key", None)
+        return cfg
+
+    def _mask_secret(self, value: Optional[str]) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        if len(text) <= 10:
+            return "*" * len(text)
+        return f"{text[:4]}...{text[-4:]}"
+
+    def _read_user_config_text(self) -> str:
+        try:
+            if USER_CONFIG_FILE.exists():
+                return USER_CONFIG_FILE.read_text(encoding="utf-8")
+        except Exception:
+            pass
+        return ""
+
+    def _build_full_llm_config(self, config_obj: Any) -> Dict[str, Any]:
+        if config_obj is None:
+            return {}
+        if isinstance(config_obj, dict):
+            return dict(config_obj)
+        return {
+            "provider": getattr(config_obj, "provider", None),
+            "base_url": getattr(config_obj, "base_url", None),
+            "api_key": getattr(config_obj, "api_key", None),
+            "model": getattr(config_obj, "model", None),
+            "temperature": getattr(config_obj, "temperature", None),
+            "max_tokens": getattr(config_obj, "max_tokens", None),
+            "timeout": getattr(config_obj, "timeout", None),
+            "max_retries": getattr(config_obj, "max_retries", None),
+            "retry_delay": getattr(config_obj, "retry_delay", None),
+        }
+
+    def _reload_runtime_from_lumina_config(self):
+        if not self.harness or not self.lumina_config:
+            return
+
+        cfg = self.lumina_config
+        harness_cfg = self.harness.config
+
+        harness_cfg.max_iterations = int(cfg.harness.get("max_iterations", harness_cfg.max_iterations))
+        harness_cfg.quality_threshold = float(cfg.harness.get("quality_threshold", harness_cfg.quality_threshold))
+        harness_cfg.output_dir = str(cfg.output.resolve_base_dir())
+        harness_cfg.vault_path = str(cfg.output.resolve_vault_path()) if cfg.output.vault_path else None
+        harness_cfg.plugin = cfg.output.plugin
+        harness_cfg.supported_extensions = list(cfg.supported_extensions)
+        harness_cfg.output_structure = dict(cfg.output.structure)
+        harness_cfg.note_organization = dict(cfg.output.note_organization)
+        harness_cfg.llm_config = self._build_full_llm_config(cfg.llm)
+        harness_cfg.llm_config_planner = dict(cfg.llm_planner or {}) if cfg.llm_planner else None
+        harness_cfg.llm_config_executor = dict(cfg.llm_executor or {}) if cfg.llm_executor else None
+        harness_cfg.llm_config_validator = dict(cfg.llm_validator or {}) if cfg.llm_validator else None
+
+        self.harness.plugin = get_plugin(str(harness_cfg.plugin))
+        self.harness.planner = Planner(
+            cache_manager=self.harness.cache,
+            history_manager=self.harness.history,
+            llm_config=harness_cfg.get_llm_config_for('planner'),
+            enable_clustering=harness_cfg.enable_clustering,
+            output_structure=harness_cfg.output_structure,
+            note_organization=harness_cfg.note_organization,
+        )
+        self.harness.executor = Executor(
+            llm_config=harness_cfg.get_llm_config_for('executor'),
+            cache_manager=self.harness.cache,
+            history_manager=self.harness.history,
+            enable_content_filter=harness_cfg.enable_content_filter,
+            enable_scene_detection=harness_cfg.enable_scene_detection,
+        )
+        self.harness.validator = Validator(
+            history_manager=self.harness.history,
+            llm_config=harness_cfg.get_llm_config_for('validator')
+        )
+
+    def _build_grouped_config_response(self) -> Dict[str, Any]:
+        harness_cfg = self.harness.config if self.harness else None
+        state = self.harness.get_state() if self.harness else {}
+
+        system_fixed = {
+            "config_schema_version": "v2-grouped-config",
+            "supported_agents": ["planner", "executor", "validator", "harness"],
+            "planner_defaults": {
+                "para_categories": dict(Planner.PARA_CATEGORY_MAP),
+                "batch_sizes": dict(Planner.BATCH_SIZES),
+                "type_priority": dict(Planner.TYPE_PRIORITY),
+            },
+        }
+
+        system_runtime = {
+            "status": state.get("status", "idle"),
+            "session_id": state.get("session_id", ""),
+            "output_dir": str(harness_cfg.output_dir) if harness_cfg else "",
+            "vector_store_enabled": bool(getattr(harness_cfg, "enable_vector_store", False)) if harness_cfg else False,
+        }
+
+        service_cfg = {}
+        if self.lumina_config:
+            service_cfg = dict(self.lumina_config.service or {})
+
+        agent_user = {
+            "harness": {
+                "max_iterations": getattr(harness_cfg, "max_iterations", 3) if harness_cfg else 3,
+                "quality_threshold": getattr(harness_cfg, "quality_threshold", 0.8) if harness_cfg else 0.8,
+                "incremental": bool(getattr(harness_cfg, "incremental", True)) if harness_cfg else True,
+                "parallel": bool(getattr(harness_cfg, "parallel", True)) if harness_cfg else True,
+                "max_workers": int(getattr(harness_cfg, "max_workers", 4)) if harness_cfg else 4,
+                "enable_vector_store": bool(getattr(harness_cfg, "enable_vector_store", True)) if harness_cfg else True,
+            },
+            "llm_shared": self.lumina_config.llm.to_dict() if self.lumina_config else {},
+            "llm_planner": self._sanitize_llm_config(self.lumina_config.llm_planner if self.lumina_config else None),
+            "llm_executor": self._sanitize_llm_config(self.lumina_config.llm_executor if self.lumina_config else None),
+            "llm_validator": self._sanitize_llm_config(self.lumina_config.llm_validator if self.lumina_config else None),
+        }
+
+        user_preferences = {
+            "input": {
+                "default_recursive": bool(self.lumina_config.default_recursive) if self.lumina_config else True,
+                "supported_extensions": list(self.lumina_config.supported_extensions) if self.lumina_config else [],
+                "sources": [
+                    {
+                        "path": src.path,
+                        "recursive": bool(src.recursive),
+                        "filter": src.filter,
+                    }
+                    for src in (self.lumina_config.input_sources if self.lumina_config else [])
+                ],
+            },
+            "output": {
+                "plugin": self.lumina_config.output.plugin if self.lumina_config else "obsidian",
+                "base_dir": self.lumina_config.output.base_dir if self.lumina_config else "",
+                "vault_path": self.lumina_config.output.vault_path if self.lumina_config else "",
+                "structure": dict(self.lumina_config.output.structure) if self.lumina_config else {},
+                "naming": dict(self.lumina_config.output.naming) if self.lumina_config else {},
+                "note_organization": dict(self.lumina_config.output.note_organization) if self.lumina_config else {},
+            },
+        }
+
+        current_snapshot = {
+            "input": user_preferences["input"],
+            "output": user_preferences["output"],
+            "harness": dict(self.lumina_config.harness or {}) if self.lumina_config else {},
+            "service": service_cfg,
+            "llm": {
+                **(self.lumina_config.llm.to_dict() if self.lumina_config else {}),
+                "api_key_masked": self._mask_secret(self.lumina_config.llm.api_key if self.lumina_config else ""),
+            },
+            "llm_planner": {
+                **self._sanitize_llm_config(self.lumina_config.llm_planner if self.lumina_config else None),
+                "api_key_masked": self._mask_secret((self.lumina_config.llm_planner or {}).get("api_key", "") if self.lumina_config else ""),
+            } if (self.lumina_config and self.lumina_config.llm_planner) else {},
+            "llm_executor": {
+                **self._sanitize_llm_config(self.lumina_config.llm_executor if self.lumina_config else None),
+                "api_key_masked": self._mask_secret((self.lumina_config.llm_executor or {}).get("api_key", "") if self.lumina_config else ""),
+            } if (self.lumina_config and self.lumina_config.llm_executor) else {},
+            "llm_validator": {
+                **self._sanitize_llm_config(self.lumina_config.llm_validator if self.lumina_config else None),
+                "api_key_masked": self._mask_secret((self.lumina_config.llm_validator or {}).get("api_key", "") if self.lumina_config else ""),
+            } if (self.lumina_config and self.lumina_config.llm_validator) else {},
+        }
+
+        return {
+            "system_config": {
+                "fixed": system_fixed,
+                "runtime": system_runtime,
+                "service": service_cfg,
+            },
+            "agent_config": {
+                "user_defined": agent_user,
+            },
+            "user_preferences": user_preferences,
+            "current_snapshot": current_snapshot,
+            "raw_user_config": self._read_user_config_text(),
+        }
+
+    def _apply_grouped_config_updates(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.harness:
+            raise ValueError("Harness not available")
+        if not self.lumina_config:
+            raise ValueError("Lumina config not available")
+
+        raw_user_config = payload.get("raw_user_config") if isinstance(payload, dict) else None
+        if isinstance(raw_user_config, str) and raw_user_config.strip():
+            USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+            USER_CONFIG_FILE.write_text(raw_user_config, encoding="utf-8")
+            self.lumina_config = LuminaConfig.load(str(USER_CONFIG_FILE))
+            self._reload_runtime_from_lumina_config()
+            return {"raw_user_config": "updated"}
+
+        applied: Dict[str, Any] = {"system_config": {}, "agent_config": {}, "user_preferences": {}}
+
+        # System/service config
+        system_cfg = payload.get("system_config", {}) if isinstance(payload, dict) else {}
+        service_cfg = system_cfg.get("service", {}) if isinstance(system_cfg, dict) else {}
+        if isinstance(service_cfg, dict) and "log_retention_days" in service_cfg:
+            days = int(service_cfg.get("log_retention_days", 15))
+            days = max(0, days)
+            self.lumina_config.service["log_retention_days"] = days
+            applied["system_config"]["service"] = {"log_retention_days": days}
+
+        # Agent user config
+        agent_cfg = payload.get("agent_config", {}) if isinstance(payload, dict) else {}
+        agent_user = agent_cfg.get("user_defined", {}) if isinstance(agent_cfg, dict) else {}
+        harness_user = agent_user.get("harness", {}) if isinstance(agent_user, dict) else {}
+        if isinstance(harness_user, dict):
+            field_map = {
+                "max_iterations": int,
+                "quality_threshold": float,
+                "incremental": bool,
+                "parallel": bool,
+                "max_workers": int,
+                "enable_vector_store": bool,
+            }
+            changed = {}
+            for key, caster in field_map.items():
+                if key not in harness_user:
+                    continue
+                value = caster(harness_user.get(key))
+                if key == "max_iterations":
+                    value = max(1, min(10, value))
+                if key == "quality_threshold":
+                    value = max(0.0, min(1.0, value))
+                setattr(self.harness.config, key, value)
+                self.lumina_config.harness[key] = value
+                changed[key] = value
+            if changed:
+                applied["agent_config"]["harness"] = changed
+
+        llm_shared = agent_user.get("llm_shared", {}) if isinstance(agent_user, dict) else {}
+        if isinstance(llm_shared, dict) and llm_shared:
+            for key in ["provider", "base_url", "model", "temperature", "max_tokens", "timeout", "max_retries", "retry_delay"]:
+                if key in llm_shared:
+                    setattr(self.lumina_config.llm, key, llm_shared[key])
+            applied["agent_config"]["llm_shared"] = self.lumina_config.llm.to_dict()
+
+        for agent_key in ["llm_planner", "llm_executor", "llm_validator"]:
+            update_val = agent_user.get(agent_key, {}) if isinstance(agent_user, dict) else {}
+            if not isinstance(update_val, dict):
+                continue
+            base_cfg = dict(getattr(self.lumina_config, agent_key) or {})
+            for key in ["provider", "base_url", "model", "temperature", "max_tokens", "timeout", "max_retries", "retry_delay"]:
+                if key in update_val:
+                    base_cfg[key] = update_val[key]
+            setattr(self.lumina_config, agent_key, base_cfg if base_cfg else None)
+            if base_cfg:
+                applied["agent_config"][agent_key] = self._sanitize_llm_config(base_cfg)
+
+        # User preferences
+        user_pref = payload.get("user_preferences", {}) if isinstance(payload, dict) else {}
+        input_pref = user_pref.get("input", {}) if isinstance(user_pref, dict) else {}
+        if isinstance(input_pref, dict):
+            changed_input = {}
+            if "default_recursive" in input_pref:
+                value = bool(input_pref.get("default_recursive"))
+                self.lumina_config.default_recursive = value
+                changed_input["default_recursive"] = value
+            if "supported_extensions" in input_pref and isinstance(input_pref.get("supported_extensions"), list):
+                value = [str(ext) for ext in input_pref.get("supported_extensions", []) if str(ext).strip()]
+                self.lumina_config.supported_extensions = value
+                self.harness.config.supported_extensions = value
+                changed_input["supported_extensions"] = value
+            if "sources" in input_pref and isinstance(input_pref.get("sources"), list):
+                new_sources = []
+                for item in input_pref.get("sources", []):
+                    if not isinstance(item, dict) or not str(item.get("path", "")).strip():
+                        continue
+                    source = {
+                        "path": str(item.get("path")).strip(),
+                        "recursive": bool(item.get("recursive", True)),
+                        "filter": item.get("filter"),
+                    }
+                    new_sources.append(source)
+                if new_sources:
+                    from .config_core import InputSource
+                    self.lumina_config.input_sources = [
+                        InputSource(path=s["path"], recursive=s["recursive"], filter=s["filter"])
+                        for s in new_sources
+                    ]
+                    changed_input["sources"] = new_sources
+            if changed_input:
+                applied["user_preferences"]["input"] = changed_input
+
+        output_pref = user_pref.get("output", {}) if isinstance(user_pref, dict) else {}
+        if isinstance(output_pref, dict):
+            changed_output = {}
+            for key in ["plugin", "base_dir", "vault_path"]:
+                if key in output_pref:
+                    value = output_pref.get(key)
+                    setattr(self.lumina_config.output, key, value)
+                    if key == "plugin":
+                        self.harness.config.plugin = value
+                        self.harness.plugin = get_plugin(str(value))
+                    if key == "base_dir":
+                        self.harness.config.output_dir = str(value)
+                    changed_output[key] = value
+            for key in ["structure", "naming", "note_organization"]:
+                if key in output_pref and isinstance(output_pref.get(key), dict):
+                    value = dict(output_pref.get(key, {}))
+                    setattr(self.lumina_config.output, key, value)
+                    if key == "structure":
+                        self.harness.config.output_structure = value
+                    if key == "note_organization":
+                        self.harness.config.note_organization = value
+                        self.harness.planner.note_organization = self.harness.planner._normalize_note_organization(value)
+                        self.harness.planner.categories = {
+                            **self.harness.planner.PARA_CATEGORY_MAP,
+                            **self.harness.planner.note_organization.get("categories", {}),
+                        }
+                        self.harness.planner.scenes = self.harness.planner.note_organization.get("scenes", [])
+                        self.harness.planner.default_scene = self.harness.planner.note_organization.get("default_scene", "")
+                    changed_output[key] = value
+            if changed_output:
+                applied["user_preferences"]["output"] = changed_output
+
+        self.lumina_config.save_user_config()
+        self._reload_runtime_from_lumina_config()
+        return applied
     
     def _get_dashboard_stats(self) -> Dict[str, Any]:
         """获取仪表板统计数据"""

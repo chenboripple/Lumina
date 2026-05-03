@@ -145,8 +145,9 @@ Planner 会在 `_assign_note_structure()` 中写入 `note_subdir`。
 规则如下：
 
 - `flat=true`：不分目录
-- 配置了 `output.scenes`：输出为 `场景/PARA`
-- 未配置 `output.scenes`：输出为 `PARA`
+- 默认 `output.note_organization.levels = ["scene", "para"]`：输出为 `场景/PARA`
+- 配置 `output.note_organization.levels = ["para", "scene"]`：输出为 `PARA/场景`
+- 未配置 `output.note_organization.scenes`：自动跳过 scene 层，仅输出 `PARA`
 
 ### PARA 推断
 
@@ -159,7 +160,7 @@ Planner 会在 `_assign_note_structure()` 中写入 `note_subdir`。
 
 ### 场景层推断
 
-`output.scenes` 是用户自定义的目录组织规则，不等同于 `SceneDetector` 的文档场景模板。
+`output.note_organization.scenes` 是用户自定义的目录组织规则，不等同于 `SceneDetector` 的文档场景模板。
 
 - 这里是按文件名关键词匹配场景目录
 - 匹配不到时用 `default_scene`
@@ -188,6 +189,6 @@ Planner 目前只使用简单、稳定的分批逻辑：
 
 ## 相关文件
 
-- [src/lumina/planner.py](/Users/ripple/work%20space/Lumina/src/lumina/planner.py)
-- [src/lumina/document_cluster.py](/Users/ripple/work%20space/Lumina/src/lumina/document_cluster.py)
-- [src/lumina/config_core.py](/Users/ripple/work%20space/Lumina/src/lumina/config_core.py)
+- [src/lumina/planner.py](../../../src/lumina/planner.py)
+- [src/lumina/document_cluster.py](../../../src/lumina/document_cluster.py)
+- [src/lumina/config_core.py](../../../src/lumina/config_core.py)

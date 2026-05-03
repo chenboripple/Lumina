@@ -59,31 +59,34 @@ output:
     by_type: false               # 按文件类型分子目录（PARA 模式下建议关闭）
     flat: false                  # 平铺（不分子目录）
 
-  # ── 第一层目录：生活场景 ──────────────────────
-  # 按关键词将笔记归入不同生活场景。未匹配则归入 default_scene。
-  # 不配置 scenes 时直接使用单层 PARA 目录。
-  scenes:
-    - name: "工作"
-      keywords: ["需求", "会议", "项目", "技术", "代码", "方案", "报告", "排期", "季度"]
-    - name: "生活"
-      keywords: ["日记", "健康", "家庭", "购物", "账单", "旅行"]
-    - name: "学习"
-      keywords: ["读书", "笔记", "课程", "学习", "摘录", "论文"]
-  default_scene: "工作"           # 关键词匹配失败时的兜底场景
+  # ── 笔记目录组织（统一配置块）──────────────────
+  # scenes/categories/levels 都放在 note_organization 下。
+  note_organization:
+    # levels 仅支持 scene / para，最多两层。
+    # 默认：scene -> para，例如 工作/Projects
+    # 可改成：para -> scene，例如 Projects/工作
+    levels: ["scene", "para"]
+    default_scene: "工作"         # scene 匹配失败时的兜底值
 
-  # ── 第二层目录：PARA 分类 ─────────────────────
-  # 每个场景内按 PARA 方法论自动分入四个子目录：
-  #   Projects  — 有明确截止目标的临时项目（完成后可划掉）
-  #   Areas     — 需长期维护的责任/兴趣领域（无明确完成日期）
-  #   Resources — 仅供参考的资料（不需完成任务）
-  #   Archive   — 已完成或不再关注的材料
-  # 最终路径示例：~/obsidian/工作/Projects/海思科差旅需求.md
-  # 留空则使用内置英文默认值；只需覆盖想自定义的项
-  categories:
-    projects:  "Projects"
-    areas:     "Areas"
-    resources: "Resources"
-    archive:   "Archive"
+    # 生活场景层
+    scenes:
+      - name: "工作"
+        keywords: ["需求", "会议", "项目", "技术", "代码", "方案", "报告", "排期", "季度"]
+        # 可选：按 scene 限制可用 PARA 分类
+        # 例如工作场景不希望出现 Resources
+        enabled_categories: ["projects", "areas", "archive"]
+        fallback_category: "areas"
+      - name: "生活"
+        keywords: ["日记", "健康", "家庭", "购物", "账单", "旅行"]
+      - name: "学习"
+        keywords: ["读书", "笔记", "课程", "学习", "摘录", "论文"]
+
+    # PARA 分类层
+    categories:
+      projects:  "Projects"
+      areas:     "Areas"
+      resources: "Resources"
+      archive:   "Archive"
 
   naming:
     prefix_date: false           # 文件名加日期前缀
@@ -183,16 +186,36 @@ llm:
 
 同时会根据检测到的 scene 选择不同 callout 类型，并自动补齐层级标签，例如 `lumina/scene/meeting_notes`、`lumina/para/Projects`。
 
-### `output.scenes` 与文档 scene 模板的区别
+### `output.note_organization.scenes` 与文档 scene 模板的区别
 
-`output.scenes` 只决定输出目录第一层如何组织，例如 `工作/Projects`、`学习/Resources`。
+`output.note_organization.scenes` 只决定输出目录中的 scene 层如何组织，例如 `工作/Projects`、`学习/Resources`。
 
 它和 Executor 里的文档 scene 模板不是同一件事：
 
-- `output.scenes`：用户配置的目录分层规则
+- `output.note_organization.scenes`：用户配置的目录分层规则
 - 文档 scene 模板：代码里的内容识别与提取策略
 
-当前内置文档 scene 已覆盖会议纪要、学术论文、PRD、设计文档、测试报告、运维文档、邮件、聊天记录等类型，即使你没有配置 `output.scenes`，这些模板也依然会参与内容提取。
+当前内置文档 scene 已覆盖会议纪要、学术论文、PRD、设计文档、测试报告、运维文档、邮件、聊天记录等类型，即使你没有配置 `output.note_organization.scenes`，这些模板也依然会参与内容提取。
+
+### `output.note_organization.levels`
+
+用于定义目录层级顺序，决定 scene 与 PARA 谁在前。
+
+- `levels: ["scene", "para"]` -> `工作/Projects`
+- `levels: ["para", "scene"]` -> `Projects/工作`
+
+当 `levels` 包含 `scene` 但没有配置 `output.note_organization.scenes` 时，会自动降级为仅输出 PARA 层。
+
+### `output.note_organization.scenes[].enabled_categories`
+
+可选字段，用于限制某个 scene 可用的 PARA 分类键：
+
+- `projects`
+- `areas`
+- `resources`
+- `archive`
+
+若推断结果不在白名单里，使用 `fallback_category`，未设置则回退到白名单首项。
 
 ### `harness.quality_threshold`
 

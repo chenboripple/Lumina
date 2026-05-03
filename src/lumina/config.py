@@ -54,8 +54,14 @@ class OutputConfig:
         "flat": False,
     })
 
-    # 知识分类目录映射（scene_type -> 目录名），覆盖 Planner 默认映射
-    categories: Dict[str, str] = field(default_factory=dict)
+    # 笔记目录组织：统一管理 scene/PARA 两层结构。
+    # levels 支持 ["scene", "para"] 或 ["para", "scene"]。
+    note_organization: Dict[str, Any] = field(default_factory=lambda: {
+        "levels": ["scene", "para"],
+        "default_scene": "",
+        "scenes": [],
+        "categories": {},
+    })
     
     # 命名约定
     naming: Dict[str, bool] = field(default_factory=lambda: {
@@ -193,7 +199,7 @@ class LuminaConfig:
             vault_path=output_data.get("vault_path"),
             structure=output_data.get("structure", {}),
             naming=output_data.get("naming", {}),
-            categories=output_data.get("categories", {}),
+            note_organization=output_data.get("note_organization", {}),
         )
         
         # 解析 LLM 配置（使用 llm.py 中的 LLMConfig）
@@ -278,9 +284,20 @@ class LuminaConfig:
                 "base_dir": self.output.base_dir,
                 "vault_path": self.output.vault_path,
                 "structure": self.output.structure,
+                "note_organization": self.output.note_organization,
                 "naming": self.output.naming,
             },
-            "llm": self.llm.to_dict(),
+            "llm": {
+                "provider": self.llm.provider,
+                "base_url": self.llm.base_url,
+                "api_key": self.llm.api_key,
+                "model": self.llm.model,
+                "temperature": self.llm.temperature,
+                "max_tokens": self.llm.max_tokens,
+                "timeout": self.llm.timeout,
+                "max_retries": self.llm.max_retries,
+                "retry_delay": self.llm.retry_delay,
+            },
             "harness": self.harness,
         }
         

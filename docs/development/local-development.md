@@ -97,7 +97,7 @@ Lumina/
 ├── tests/
 │   └── test_debug.py          # 调试模式测试（新增）
 ├── docs/
-│   └── example_config_with_separate_llm.yaml
+│   └── examples/example_config_with_separate_llm.yaml
 ├── lumina.py                  # 快速启动脚本（新增）
 ├── install.py
 ├── pyproject.toml

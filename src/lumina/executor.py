@@ -553,24 +553,33 @@ class Executor:
 ```
 
 ## Instructions
-1. Extract key concepts and insights
-2. Create a clear, structured summary
-3. Identify potential links to other topics
-4. Suggest relevant tags
-5. Assess content complexity and confidence
+1. Extract the main topic, why it matters, and the author or system intent
+2. Create a clear, structured summary that preserves factual density instead of generic compression
+3. Capture the most important takeaways as concrete bullets, not vague labels
+4. Pull out supporting details such as examples, constraints, decisions, tradeoffs, numbers, APIs, or references when present
+5. Identify action items or next steps when the source implies them
+6. Capture open questions, unresolved assumptions, or risks when present
+7. Identify potential links to other topics
+8. Suggest relevant tags
+9. Assess content complexity and confidence
 {guidance_block}
 
 ## Output Format
 Return JSON with this structure:
 {{
     "title": "Clear topical title. Do not copy raw filenames, date folders, Collection, Append to, or generic placeholders.",
-    "summary": "Brief overview of the content",
-    "key_points": ["point 1", "point 2", "point 3"],
+    "summary": "2-4 sentence overview that explains what the content is about and why it matters.",
+    "key_points": ["concrete takeaway 1", "concrete takeaway 2", "concrete takeaway 3"],
+    "supporting_details": ["important example, fact, decision, metric, API, or nuance"],
+    "action_items": ["specific next step or follow-up item, if any"],
+    "open_questions": ["unresolved question, ambiguity, dependency, or risk, if any"],
     "tags": ["tag1", "tag2", "tag3"],
     "suggested_links": ["Topic A", "Topic B"],
     "metadata": {{
         "complexity": "simple|moderate|complex",
         "confidence": 0.95,
+        "knowledge_density": "low|medium|high",
+        "document_type": "brief|spec|note|report|reference|other",
         "word_count": 150
     }}
 }}
@@ -598,24 +607,33 @@ Return JSON with this structure:
 
 ## Instructions
 1. Read all parts and understand the complete picture
-2. Extract key concepts and insights from the entire document
-3. Create a comprehensive, structured summary
-4. Identify potential links to other topics
-5. Suggest relevant tags
-6. Assess overall complexity and confidence
+2. Extract the core topic, system intent, and major themes across the full document
+3. Create a comprehensive summary that preserves distinctions between goals, facts, decisions, and implications
+4. Produce concrete key points covering the most important knowledge from all parts
+5. Capture supporting details such as examples, constraints, tradeoffs, architecture elements, numbers, or references
+6. Identify action items or practical follow-ups when present
+7. Record open questions, ambiguities, missing dependencies, or risks when present
+8. Identify potential links to other topics
+9. Suggest relevant tags
+10. Assess overall complexity and confidence
 {guidance_block}
 
 ## Output Format
 Return JSON with this structure:
 {{
     "title": "Clear topical title reflecting the document theme. Never reuse raw filenames or generic folder labels.",
-    "summary": "Detailed overview covering all parts",
-    "key_points": ["point 1", "point 2", "point 3", "point 4", "point 5"],
+    "summary": "Detailed overview covering all parts and their main implications.",
+    "key_points": ["concrete point 1", "concrete point 2", "concrete point 3", "concrete point 4", "concrete point 5"],
+    "supporting_details": ["important fact, example, tradeoff, dependency, or implementation detail"],
+    "action_items": ["specific next step or follow-up item, if any"],
+    "open_questions": ["unresolved question, ambiguity, dependency, or risk, if any"],
     "tags": ["tag1", "tag2", "tag3", "tag4"],
     "suggested_links": ["Topic A", "Topic B", "Topic C"],
     "metadata": {{
         "complexity": "simple|moderate|complex",
         "confidence": 0.95,
+        "knowledge_density": "low|medium|high",
+        "document_type": "brief|spec|note|report|reference|other",
         "parts_processed": {len(chunks)},
         "word_count": 500
     }}
@@ -654,8 +672,10 @@ Return JSON with this structure:
 1. Fix all issues listed above
 2. Keep the core information intact
 3. Improve structure and clarity
-4. Maintain the same JSON output format
-5. Increase quality score
+4. Increase factual density where the current note is too generic or thin
+5. Preserve concrete examples, decisions, constraints, and unresolved questions when they exist in the source
+6. Maintain the same JSON output format
+7. Increase quality score
 
 ## Output Format
 Return JSON with this structure:
@@ -663,11 +683,15 @@ Return JSON with this structure:
     "title": "Improved title",
     "summary": "Improved summary",
     "key_points": ["improved point 1", "improved point 2"],
+    "supporting_details": ["important fact or nuance"],
+    "action_items": ["next step, if any"],
+    "open_questions": ["remaining question or risk, if any"],
     "tags": ["tag1", "tag2"],
     "suggested_links": ["Topic A", "Topic B"],
     "metadata": {{
         "complexity": "simple|moderate|complex",
-        "confidence": 0.95
+        "confidence": 0.95,
+        "knowledge_density": "low|medium|high"
     }}
 }}
 """
@@ -870,30 +894,41 @@ Return JSON with this structure:
     
     def _to_markdown(self, data: Dict[str, Any]) -> str:
         """转换为 Markdown 格式"""
+        metadata = data.get("metadata", {}) or {}
         lines = [
             f"# {data.get('title', 'Untitled')}\n",
             f"## Summary\n",
             f"{data.get('summary', '')}\n",
-            f"## Key Points\n",
         ]
-        
-        for point in data.get("key_points", []):
-            lines.append(f"- {point}\n")
-        
-        if data.get("suggested_links"):
-            lines.extend([
-                f"\n## Related Topics\n",
-            ])
-            for link in data["suggested_links"]:
-                lines.append(f"- {link}\n")
-        
+
+        self._append_bullet_section(lines, "Key Points", data.get("key_points", []))
+        self._append_bullet_section(lines, "Supporting Details", data.get("supporting_details", []))
+        self._append_bullet_section(lines, "Action Items", data.get("action_items", []), checkbox=True)
+        self._append_bullet_section(lines, "Open Questions", data.get("open_questions", []))
+        self._append_bullet_section(lines, "Related Topics", data.get("suggested_links", []))
+
         lines.extend([
             f"\n## Metadata\n",
-            f"- Complexity: {data.get('metadata', {}).get('complexity', 'unknown')}\n",
-            f"- Confidence: {data.get('metadata', {}).get('confidence', 0)}\n",
+            f"- Complexity: {metadata.get('complexity', 'unknown')}\n",
+            f"- Confidence: {metadata.get('confidence', 0)}\n",
         ])
-        
+
+        if metadata.get("knowledge_density"):
+            lines.append(f"- Knowledge Density: {metadata.get('knowledge_density')}\n")
+        if metadata.get("document_type"):
+            lines.append(f"- Document Type: {metadata.get('document_type')}\n")
+
         return "".join(lines)
+
+    def _append_bullet_section(self, lines: List[str], title: str, items: List[Any], checkbox: bool = False):
+        normalized_items = [str(item).strip() for item in (items or []) if str(item).strip()]
+        if not normalized_items:
+            return
+
+        lines.append(f"\n## {title}\n")
+        prefix = "- [ ]" if checkbox else "-"
+        for item in normalized_items:
+            lines.append(f"{prefix} {item}\n")
     
     def get_stats(self) -> Dict[str, Any]:
         """获取执行统计"""

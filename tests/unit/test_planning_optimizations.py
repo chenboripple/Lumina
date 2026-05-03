@@ -86,6 +86,74 @@ commit;
 
         self.assertTrue(any(batch_file.metadata.get("overview_scope") == "global" for batch in plan.batches for batch_file in batch))
 
+    def test_note_directory_scene_para_order(self):
+        scan_dir = Path(self.temp_dir.name) / "structure_scene_para"
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        target_file = scan_dir / "项目需求说明.md"
+        target_file.write_text("# 项目需求", encoding="utf-8")
+
+        planner = Planner(
+            enable_clustering=False,
+            note_organization={
+                "levels": ["scene", "para"],
+                "default_scene": "工作",
+                "scenes": [{"name": "工作", "keywords": ["项目", "需求"]}],
+                "categories": {},
+            },
+        )
+        files = planner.scan(str(scan_dir), recursive=False)
+        planner._assign_note_structure(files)
+
+        current = next(file_info for file_info in files if file_info.path == target_file)
+        self.assertEqual(current.metadata.get("note_subdir"), "工作/Projects")
+
+    def test_note_directory_para_scene_order(self):
+        scan_dir = Path(self.temp_dir.name) / "structure_para_scene"
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        target_file = scan_dir / "项目需求说明.md"
+        target_file.write_text("# 项目需求", encoding="utf-8")
+
+        planner = Planner(
+            enable_clustering=False,
+            note_organization={
+                "levels": ["para", "scene"],
+                "default_scene": "工作",
+                "scenes": [{"name": "工作", "keywords": ["项目", "需求"]}],
+                "categories": {},
+            },
+        )
+        files = planner.scan(str(scan_dir), recursive=False)
+        planner._assign_note_structure(files)
+
+        current = next(file_info for file_info in files if file_info.path == target_file)
+        self.assertEqual(current.metadata.get("note_subdir"), "Projects/工作")
+
+    def test_scene_specific_categories_can_disable_resources(self):
+        scan_dir = Path(self.temp_dir.name) / "structure_scene_policy"
+        scan_dir.mkdir(parents=True, exist_ok=True)
+        target_file = scan_dir / "工作备忘录.md"
+        target_file.write_text("# 备忘录", encoding="utf-8")
+
+        planner = Planner(
+            enable_clustering=False,
+            note_organization={
+                "levels": ["scene", "para"],
+                "default_scene": "工作",
+                "scenes": [{
+                    "name": "工作",
+                    "keywords": ["工作"],
+                    "enabled_categories": ["projects", "areas", "archive"],
+                    "fallback_category": "areas",
+                }],
+                "categories": {},
+            },
+        )
+        files = planner.scan(str(scan_dir), recursive=False)
+        planner._assign_note_structure(files)
+
+        current = next(file_info for file_info in files if file_info.path == target_file)
+        self.assertEqual(current.metadata.get("note_subdir"), "工作/Areas")
+
     def test_executor_prefers_clear_title_hint(self):
         executor = Executor.__new__(Executor)
 

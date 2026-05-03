@@ -60,9 +60,7 @@ class HarnessConfig:
     error_handler: Optional[Any] = None  # 错误处理器实例
     supported_extensions: List[str] = field(default_factory=list)  # 允许处理的文件扩展名
     output_structure: Dict[str, bool] = field(default_factory=dict)  # 输出目录结构策略
-    categories: Dict[str, str] = field(default_factory=dict)  # PARA 分类目录映射
-    scenes: List[Dict[str, Any]] = field(default_factory=list)  # 生活场景列表
-    default_scene: str = ""  # 匹配失败时的默认场景
+    note_organization: Dict[str, Any] = field(default_factory=dict)  # 笔记目录组织（scene/PARA）
     
     # 新增功能配置（默认启用）
     enable_clustering: bool = True  # 是否启用文档聚合
@@ -164,9 +162,7 @@ class Harness:
             llm_config=self.config.get_llm_config_for('planner'),
             enable_clustering=self.config.enable_clustering,
             output_structure=self.config.output_structure,
-            categories=self.config.categories,
-            scenes=self.config.scenes,
-            default_scene=self.config.default_scene,
+            note_organization=self.config.note_organization,
         )
         self.executor = Executor(
             llm_config=self.config.get_llm_config_for('executor'),

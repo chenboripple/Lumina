@@ -14,9 +14,9 @@
 | **CacheManager** | 三级缓存：文件缓存、LLM 响应缓存、状态缓存 | `src/lumina/cache.py` |
 | **HistoryManager** | 操作历史：SQLite 记录、版本管理、质量趋势、审计追踪、可解释性 | `src/lumina/history.py` |
 | **FileUtils** | 文件工具：哈希计算、类型检测 | `src/lumina/utils/file_utils.py` |
-| **Planner 文档** | 完整架构文档、使用指南、API 参考 | `docs/architecture/planner.md` |
-| **Cache 文档** | 缓存系统文档、性能数据、最佳实践 | `docs/architecture/cache.md` |
-| **History 文档** | 历史系统文档、查询示例、扩展指南 | `docs/architecture/history.md` |
+| **Planner 文档** | 完整架构文档、使用指南、API 参考 | `docs/design/architecture/planner.md` |
+| **Cache 文档** | 缓存系统文档、性能数据、最佳实践 | `docs/design/architecture/cache.md` |
+| **History 文档** | 历史系统文档、查询示例、扩展指南 | `docs/design/architecture/history.md` |
 
 ### 🔄 待完成
 
