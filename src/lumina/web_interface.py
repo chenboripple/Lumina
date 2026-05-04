@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 
 # 尝试导入 Flask
@@ -1279,7 +1279,19 @@ class WebInterface:
 
         if harness_running:
             if not self._scan_state.get("running"):
-                started_at = datetime.now().isoformat()
+                existing_started_at = self._scan_state.get("started_at")
+                started_at = None
+                if existing_started_at:
+                    started_at = str(existing_started_at)
+                else:
+                    try:
+                        live_elapsed = float(live.get("elapsed_time", 0) or 0)
+                    except Exception:
+                        live_elapsed = 0.0
+                    if live_elapsed > 0:
+                        started_at = (datetime.now() - timedelta(seconds=live_elapsed)).isoformat()
+                    else:
+                        started_at = datetime.now().isoformat()
                 self._scan_state.update({
                     "running": True,
                     "phase": "running",
@@ -1289,8 +1301,25 @@ class WebInterface:
                 })
             if (not previous_message) or previous_phase in {"completed", "failed", "idle"}:
                 self._scan_state["message"] = "后台处理中..."
-        elif self._scan_state.get("running") and self._scan_state.get("phase") == "running":
-            self._scan_state["running"] = False
+
+        # 兜底：若运行已停止但 queue 仍残留 processing，说明该轮扫描中断，
+        # 需要收敛状态，避免前端长期显示“处理中”且无进展。
+        if (
+            (not self._scan_state.get("running"))
+            and (not harness_running)
+            and str(self._scan_state.get("phase", "")).lower() != "running"
+            and queue
+        ):
+            stale_processing = [q for q in queue if q.get("status") == "processing"]
+            if stale_processing:
+                for item in stale_processing:
+                    item["status"] = "failed"
+                self._scan_state["phase"] = "failed"
+                self._scan_state["last_status"] = "failed"
+                self._scan_state["current_source"] = ""
+                self._scan_state["current_source_index"] = -1
+                self._scan_state["message"] = "扫描已中断，请重试"
+                self._scan_state["last_event_at"] = datetime.now().isoformat()
 
         # 非运行且没有队列时，保留最近一次计数，不再被归零。
         if not self._scan_state.get("running") and not queue:
@@ -1364,6 +1393,11 @@ class WebInterface:
                 elapsed_seconds = max(0.0, (datetime.now() - start_dt).total_seconds())
             except Exception:
                 elapsed_seconds = 0.0
+        if harness_running:
+            try:
+                elapsed_seconds = max(elapsed_seconds, float(live.get("elapsed_time", 0) or 0))
+            except Exception:
+                pass
 
         if elapsed_seconds > 0:
             progress_units_total = total_files if total_files > 0 else int(self._scan_state.get("sources_total", 0) or 0)
