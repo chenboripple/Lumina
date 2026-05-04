@@ -90,6 +90,24 @@ class HistoryManager:
                     status TEXT DEFAULT 'running'
                 )
             """)
+
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS file_insights (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    file_path TEXT UNIQUE NOT NULL,
+                    file_hash TEXT NOT NULL,
+                    content_summary TEXT,
+                    content_tags TEXT,
+                    content_type TEXT,
+                    learning_value_score REAL,
+                    has_learning_value INTEGER,
+                    learning_action TEXT,
+                    learning_reasoning TEXT,
+                    analysis_source TEXT,
+                    analysis_truncated INTEGER,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_file_path ON processing_records(file_path)
@@ -97,6 +115,10 @@ class HistoryManager:
             
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_session ON processing_records(session_id)
+            """)
+
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_file_insights_hash ON file_insights(file_hash)
             """)
     
     def start_session(self, session_id: str):
@@ -217,3 +239,71 @@ class HistoryManager:
                 explanation.append(f"    修复建议: {', '.join(iteration.get('validation', {}).get('suggestions', []))[:100]}")
         
         return "\n".join(explanation)
+
+    def get_file_insight(self, file_path: str) -> Optional[Dict[str, Any]]:
+        """获取文件洞察（摘要/标签/学习价值）持久化记录。"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM file_insights WHERE file_path = ?",
+                (file_path,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+
+            data = dict(row)
+            try:
+                data["content_tags"] = json.loads(data.get("content_tags") or "[]")
+            except json.JSONDecodeError:
+                data["content_tags"] = []
+            data["has_learning_value"] = bool(data.get("has_learning_value"))
+            data["analysis_truncated"] = bool(data.get("analysis_truncated"))
+            return data
+
+    def upsert_file_insight(self, file_path: str, file_hash: str, insight: Dict[str, Any]):
+        """写入或更新文件洞察记录。"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO file_insights (
+                    file_path,
+                    file_hash,
+                    content_summary,
+                    content_tags,
+                    content_type,
+                    learning_value_score,
+                    has_learning_value,
+                    learning_action,
+                    learning_reasoning,
+                    analysis_source,
+                    analysis_truncated,
+                    updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT(file_path) DO UPDATE SET
+                    file_hash=excluded.file_hash,
+                    content_summary=excluded.content_summary,
+                    content_tags=excluded.content_tags,
+                    content_type=excluded.content_type,
+                    learning_value_score=excluded.learning_value_score,
+                    has_learning_value=excluded.has_learning_value,
+                    learning_action=excluded.learning_action,
+                    learning_reasoning=excluded.learning_reasoning,
+                    analysis_source=excluded.analysis_source,
+                    analysis_truncated=excluded.analysis_truncated,
+                    updated_at=CURRENT_TIMESTAMP
+                """,
+                (
+                    file_path,
+                    file_hash,
+                    insight.get("content_summary", ""),
+                    json.dumps(insight.get("content_tags", []), ensure_ascii=False),
+                    insight.get("content_type", "unknown"),
+                    float(insight.get("learning_value_score", 0.0)),
+                    1 if insight.get("has_learning_value") else 0,
+                    insight.get("learning_action", "process"),
+                    insight.get("learning_reasoning", ""),
+                    insight.get("analysis_source", "none"),
+                    1 if insight.get("analysis_truncated") else 0,
+                )
+            )

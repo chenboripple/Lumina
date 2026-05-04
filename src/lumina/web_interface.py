@@ -72,6 +72,9 @@ class WebInterface:
             },
             "file_counts": {
                 "total": 0,
+                "scanned": 0,
+                "changed": 0,
+                "in_progress": 0,
                 "completed": 0,
                 "processed": 0,
                 "failed": 0,
@@ -383,6 +386,9 @@ class WebInterface:
                 },
                 "file_counts": {
                     "total": 0,
+                      "scanned": 0,
+                      "changed": 0,
+                      "in_progress": 0,
                     "completed": 0,
                     "processed": 0,
                     "failed": 0,
@@ -437,6 +443,7 @@ class WebInterface:
                             stats = report.get("statistics", {}) if isinstance(report, dict) else {}
                             after_state = self.harness.get_state() if self.harness else {}
                             total_files = int(stats.get("total_files", 0) or after_state.get("total_files", 0) or 0)
+                            changed_files = int(after_state.get("changed_files", 0) or total_files)
                             processed_files = max(0, int(after_state.get("processed_files", 0)) - int(source_baseline.get("processed_files", 0)))
                             failed_files = max(0, int(after_state.get("failed_files", 0)) - int(source_baseline.get("failed_files", 0)))
                             skipped_files = max(0, int(after_state.get("skipped_files", 0)) - int(source_baseline.get("skipped_files", 0)))
@@ -444,6 +451,7 @@ class WebInterface:
                             if idx < len(self._scan_state["queue"]):
                                 item = self._scan_state["queue"][idx]
                                 item["total_files"] = total_files
+                                item["changed_files"] = changed_files
                                 item["processed"] = processed_files
                                 item["failed"] = failed_files
                                 item["skipped"] = skipped_files
@@ -1145,6 +1153,9 @@ class WebInterface:
                 "progress_percent": 100.0 if completed > 0 else 0.0,
                 "file_counts": {
                     "total": completed,
+                    "scanned": int(state.get("scanned_files", 0) or completed),
+                    "changed": int(state.get("changed_files", 0) or completed),
+                    "in_progress": 0,
                     "completed": completed,
                     "processed": total_processed,
                     "failed": total_failed,
@@ -1173,11 +1184,12 @@ class WebInterface:
         }.get(mode, "后台处理中...")
 
         with self._scan_state_lock:
+            now_started_at = self._scan_state.get("started_at") if self._scan_state.get("running") else now
             self._scan_state.update({
                 "running": True,
                 "phase": "running",
                 "last_status": "running",
-                "started_at": self._scan_state.get("started_at") or now,
+                "started_at": now_started_at or now,
                 "last_event_at": now,
                 "current_source": str(target_path or ""),
                 "current_source_index": -1,
@@ -1210,7 +1222,7 @@ class WebInterface:
 
         if harness_running:
             if not self._scan_state.get("running"):
-                started_at = self._scan_state.get("started_at") or datetime.now().isoformat()
+                started_at = datetime.now().isoformat()
                 self._scan_state.update({
                     "running": True,
                     "phase": "running",
@@ -1222,6 +1234,20 @@ class WebInterface:
                 self._scan_state["message"] = "后台处理中..."
         elif self._scan_state.get("running") and self._scan_state.get("phase") == "running":
             self._scan_state["running"] = False
+
+        # 非运行且没有队列时，保留最近一次计数，不再被归零。
+        if not self._scan_state.get("running") and not queue:
+            live_scanned = int(live.get("scanned_files", 0) or 0)
+            live_changed = int(live.get("changed_files", 0) or 0)
+            existing_counts = dict(self._scan_state.get("file_counts", {}))
+            existing_counts["scanned"] = max(int(existing_counts.get("scanned", 0) or 0), live_scanned)
+            existing_counts["changed"] = max(int(existing_counts.get("changed", 0) or 0), live_changed)
+            existing_counts["in_progress"] = 0
+            self._scan_state["file_counts"] = existing_counts
+            self._scan_state["elapsed_seconds"] = 0.0
+            self._scan_state["eta_seconds"] = None
+            self._scan_state["rate_per_minute"] = 0.0
+            return
 
         # 扫描运行中：把当前 source 的实时文件进度映射到 queue
         if self._scan_state.get("running") and self.harness:
@@ -1255,11 +1281,13 @@ class WebInterface:
 
         # 聚合文件级状态
         total_files = sum(int(q.get("total_files", 0) or 0) for q in queue)
+        changed_files = sum(int(q.get("changed_files", q.get("total_files", 0)) or 0) for q in queue)
         processed_files = sum(int(q.get("processed", 0) or 0) for q in queue)
         failed_files = sum(int(q.get("failed", 0) or 0) for q in queue)
         skipped_files = sum(int(q.get("skipped", 0) or 0) for q in queue)
         completed_files = processed_files + failed_files + skipped_files
         pending_files = max(0, total_files - completed_files)
+        in_progress_files = int(live.get("in_progress_files", 0) or 0)
 
         # 若仍未知 total_files，退化为 source 级进度
         if total_files > 0:
@@ -1292,6 +1320,9 @@ class WebInterface:
         self._scan_state["source_counts"] = source_counts
         self._scan_state["file_counts"] = {
             "total": total_files,
+            "scanned": max(total_files, int(live.get("scanned_files", 0) or 0)),
+            "changed": max(changed_files, int(live.get("changed_files", 0) or 0)),
+            "in_progress": in_progress_files,
             "completed": completed_files,
             "processed": processed_files,
             "failed": failed_files,

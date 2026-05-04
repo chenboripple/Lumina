@@ -1,0 +1,82 @@
+# Lumina 内容预分析配置示例
+# 用于优化 Token 消耗和智能决策
+
+llm:
+  provider: openai
+  model: gpt-4o  # 主力模型（Executor 使用）
+  api_key: ${OPENAI_API_KEY}
+  temperature: 0.3
+  max_tokens: 2000
+
+# 轻量模型配置（ContentAnalyzer 使用）
+# 用于生成文件简述，做过滤/合并决策
+llm_config_analyzer:
+  provider: openai
+  model: gpt-4o-mini  # 轻量模型，成本低 10-20x
+  api_key: ${OPENAI_API_KEY}
+  temperature: 0.3
+  max_tokens: 500  # 简述只需要短输出
+
+# Planner 配置（可选，使用默认配置）
+llm_config_planner:
+  provider: openai
+  model: gpt-4o-mini  # Planner 也可以用轻量模型
+  temperature: 0.2
+
+# Executor 配置（可选，使用默认配置）
+llm_config_executor:
+  provider: openai
+  model: gpt-4o  # 主力模型生成高质量笔记
+  temperature: 0.3
+
+# Validator 配置（可选）
+llm_config_validator:
+  provider: openai
+  model: gpt-4o-mini
+  temperature: 0.2
+
+harness:
+  max_iterations: 3
+  quality_threshold: 0.8
+  
+  # 启用内容预分析（推荐）
+  enable_content_analyzer: true
+  content_analyzer_max_length: 3000  # 分析时读取的最大字符数
+  
+  # 其他功能开关
+  enable_clustering: true
+  enable_content_filter: true
+  enable_scene_detection: true
+  
+  # 并行处理
+  parallel: true
+  max_workers: 4
+
+input:
+  sources:
+    - path: ~/Documents
+      recursive: true
+      filter: "*.md,*.txt,*.py"
+
+output:
+  plugin: obsidian
+  base_dir: ~/Lumina/Notes
+  
+  # 笔记目录组织
+  note_organization:
+    levels: ["scene", "para"]
+    default_scene: ""
+    scenes:
+      - name: "工作"
+        keywords: ["需求", "项目", "会议", "技术"]
+        enabled_categories: ["projects", "areas"]
+        fallback_category: "resources"
+      - name: "学习"
+        keywords: ["学习", "笔记", "教程", "读书"]
+        enabled_categories: ["resources", "areas"]
+        fallback_category: "resources"
+    categories:
+      projects: "Projects"
+      areas: "Areas"
+      resources: "Resources"
+      archive: "Archive"
