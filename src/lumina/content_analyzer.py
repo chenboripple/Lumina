@@ -111,7 +111,7 @@ Guidelines:
             "total_cost": 0.0,
         }
 
-    def analyze_file(self, file_path: Path, file_type: str = "unknown") -> ContentBrief:
+    def analyze_file(self, file_path: Path, file_type: str = "unknown", max_length: Optional[int] = None) -> ContentBrief:
         """
         分析单个文件，返回内容简述
         
@@ -135,7 +135,8 @@ Guidelines:
         self.stats["cache_misses"] += 1
         
         # 读取文件内容
-        content = self._read_file_content(file_path)
+        effective_max = max_length if max_length is not None else self.max_content_length
+        content = self._read_file_content(file_path, effective_max)
         if not content:
             # 空文件或读取失败
             return ContentBrief(
@@ -201,8 +202,9 @@ Guidelines:
             duration=duration
         )
 
-    def _read_file_content(self, file_path: Path) -> str:
+    def _read_file_content(self, file_path: Path, max_length: Optional[int] = None) -> str:
         """读取文件内容，限制长度"""
+        limit = max_length if max_length is not None else self.max_content_length
         try:
             # 根据文件类型选择读取方式
             suffix = file_path.suffix.lower()
@@ -217,13 +219,13 @@ Guidelines:
                     from .core.multimodal_extractor import MultimodalExtractor
                     extractor = MultimodalExtractor()
                     result = extractor.extract(file_path)
-                    return result.text[:self.max_content_length] if result.text else "[PDF - no extractable text]"
+                    return result.text[:limit] if result.text else "[PDF - no extractable text]"
                 except:
                     return "[PDF file]"
             
             # 文本文件直接读取
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                return f.read(self.max_content_length)
+                return f.read(limit)
                 
         except Exception as e:
             return f"[Error reading file: {str(e)}]"
@@ -243,14 +245,12 @@ Guidelines:
         )
         
         # 调用 LLM
-        response = self.llm_provider.generate(prompt)
+        response_text = self.llm_provider.complete(prompt)
         self.stats["total_calls"] += 1
-        self.stats["total_tokens"] += response.get("total_tokens", 0)
-        self.stats["total_cost"] += response.get("cost", 0.0)
-        
+
         # 解析响应
         try:
-            result = self._parse_response(response["content"])
+            result = self._parse_response(response_text)
         except Exception as e:
             # 解析失败返回默认值
             result = {
@@ -303,14 +303,14 @@ Guidelines:
         if not self.cache:
             return None
         
-        cache_key = f"content_brief:{file_hash}"
-        cached_data = self.cache.get(cache_key)
+        cache_key = hashlib.md5(f"content_brief:{file_hash}".encode()).hexdigest()
+        cached_data = self.cache.get_llm_response(cache_key)
         
         if cached_data:
             try:
                 data = json.loads(cached_data)
                 return ContentBrief(**data)
-            except:
+            except Exception:
                 return None
         
         return None
@@ -320,7 +320,7 @@ Guidelines:
         if not self.cache:
             return
         
-        cache_key = f"content_brief:{file_hash}"
+        cache_key = hashlib.md5(f"content_brief:{file_hash}".encode()).hexdigest()
         cache_data = {
             "file_path": brief.file_path,
             "file_hash": brief.file_hash,
@@ -332,7 +332,7 @@ Guidelines:
             "merge_candidates": brief.merge_candidates,
             "metadata": brief.metadata,
         }
-        self.cache.set(cache_key, json.dumps(cache_data))
+        self.cache.set_llm_response(cache_key, json.dumps(cache_data), ttl_days=30)
 
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""

@@ -45,6 +45,7 @@ class ProcessingPlan:
     strategy: str  # 策略名称
     batches: List[List[FileInfo]]  # 分批处理
     summary: str  # 计划摘要
+    note_structure_plan: Dict[str, Any] = field(default_factory=dict)  # 基于摘要/标签生成的笔记结构建议
 
 
 class Planner:
@@ -128,6 +129,18 @@ class Planner:
         
         # 初始化文档聚合器
         self.clusterer = DocumentClusterer() if enable_clustering else None
+
+        # 初始化内容分析器（用于逐文件摘要/标签与学习价值判断）
+        self.content_analyzer = None
+        try:
+            if self.llm_config:
+                self.content_analyzer = ContentAnalyzer(
+                    llm_config=self.llm_config,
+                    cache_manager=self.cache,
+                    max_content_length=3000,
+                )
+        except Exception as e:
+            print(f"Warning: ContentAnalyzer initialization failed: {e}")
         
         # 统计信息
         self.stats = {
@@ -223,6 +236,9 @@ class Planner:
             
             # 识别所需能力
             required_capabilities = self._identify_capabilities(file_path, file_type)
+
+            # 基于 LLM 的轻量内容分析（摘要、标签、学习价值）
+            content_insight = self._analyze_content_insight(file_path, file_type, file_hash, stat.st_size)
             
             return FileInfo(
                 path=file_path,
@@ -233,6 +249,7 @@ class Planner:
                 metadata={
                     "filename": file_path.name,
                     "extension": file_path.suffix,
+                    **content_insight,
                 },
                 processing_priority=self.TYPE_PRIORITY.get(file_type, 7),
                 estimated_cost=estimated_cost,
@@ -281,6 +298,113 @@ class Planner:
         """判断图片是否需要 OCR"""
         # 简化判断：所有图片都尝试 OCR
         return True
+
+    def _analyze_content_insight(self, file_path: Path, file_type: str, file_hash: str, file_size: int) -> Dict[str, Any]:
+        """提取文件摘要、标签和学习价值判断。"""
+        insight_state_key = f"insight::{str(file_path)}"
+        default = {
+            "content_summary": "",
+            "content_tags": [],
+            "content_type": file_type,
+            "learning_value_score": 0.0,
+            "has_learning_value": False,
+            "learning_action": "process",
+            "learning_reasoning": "",
+            "analysis_source": "none",
+            "analysis_truncated": False,
+        }
+
+        # 优先读取持久化洞察；哈希一致则直接复用。
+        if self.history:
+            try:
+                stored = self.history.get_file_insight(str(file_path))
+                if stored and stored.get("file_hash") == file_hash:
+                    return {
+                        "content_summary": stored.get("content_summary", ""),
+                        "content_tags": stored.get("content_tags", []),
+                        "content_type": stored.get("content_type", file_type),
+                        "learning_value_score": stored.get("learning_value_score", 0.0),
+                        "has_learning_value": bool(stored.get("has_learning_value", False)),
+                        "learning_action": stored.get("learning_action", "process"),
+                        "learning_reasoning": stored.get("learning_reasoning", ""),
+                        "analysis_source": stored.get("analysis_source", "history"),
+                        "analysis_truncated": bool(stored.get("analysis_truncated", False)),
+                        "analyzed_file_hash": file_hash,
+                    }
+            except Exception as e:
+                print(f"Warning: Failed to load persisted insight for {file_path}: {e}")
+
+        if self.cache:
+            try:
+                cached_state = self.cache.get_processing_state(insight_state_key)
+                if cached_state and cached_state.get("file_hash") == file_hash:
+                    return {
+                        "content_summary": cached_state.get("content_summary", ""),
+                        "content_tags": cached_state.get("content_tags", []),
+                        "content_type": cached_state.get("content_type", file_type),
+                        "learning_value_score": cached_state.get("learning_value_score", 0.0),
+                        "has_learning_value": bool(cached_state.get("has_learning_value", False)),
+                        "learning_action": cached_state.get("learning_action", "process"),
+                        "learning_reasoning": cached_state.get("learning_reasoning", ""),
+                        "analysis_source": cached_state.get("analysis_source", "cache_state"),
+                        "analysis_truncated": bool(cached_state.get("analysis_truncated", False)),
+                        "analyzed_file_hash": file_hash,
+                    }
+            except Exception as e:
+                print(f"Warning: Failed to load cached insight for {file_path}: {e}")
+
+        if not self.content_analyzer:
+            return default
+
+        try:
+            # 超大文件只读取前 1000 字符做判断，降低开销
+            max_length = 1000 if file_size >= 1024 * 1024 else 3000
+            brief = self.content_analyzer.analyze_file(file_path, file_type=file_type, max_length=max_length)
+            insight = {
+                "content_summary": brief.brief_summary,
+                "content_tags": brief.key_topics,
+                "content_type": brief.content_type or file_type,
+                "learning_value_score": brief.estimated_value,
+                "has_learning_value": brief.estimated_value >= 0.6 and brief.suggested_action != "skip",
+                "learning_action": brief.suggested_action,
+                "learning_reasoning": brief.metadata.get("reasoning", ""),
+                "analysis_source": "llm",
+                "analysis_truncated": max_length == 1000,
+                "analyzed_file_hash": file_hash,
+            }
+
+            # 持久化：同一路径会随 file_hash 变化自动覆盖更新。
+            if self.history:
+                try:
+                    self.history.upsert_file_insight(str(file_path), file_hash, insight)
+                except Exception as e:
+                    print(f"Warning: Failed to persist insight for {file_path}: {e}")
+
+            if self.cache:
+                try:
+                    self.cache.set_processing_state(
+                        insight_state_key,
+                        {
+                            "file_hash": file_hash,
+                            "content_summary": insight.get("content_summary", ""),
+                            "content_tags": insight.get("content_tags", []),
+                            "content_type": insight.get("content_type", file_type),
+                            "learning_value_score": insight.get("learning_value_score", 0.0),
+                            "has_learning_value": insight.get("has_learning_value", False),
+                            "learning_action": insight.get("learning_action", "process"),
+                            "learning_reasoning": insight.get("learning_reasoning", ""),
+                            "analysis_source": insight.get("analysis_source", "llm"),
+                            "analysis_truncated": insight.get("analysis_truncated", False),
+                        },
+                    )
+                except Exception as e:
+                    print(f"Warning: Failed to cache insight state for {file_path}: {e}")
+
+            return insight
+        except Exception as e:
+            default["analysis_source"] = "fallback"
+            default["learning_reasoning"] = str(e)
+            return default
     
     def plan(self, files: List[FileInfo], existing_notes: Optional[List[Dict[str, Any]]] = None, content_briefs: Optional[List[ContentBrief]] = None) -> ProcessingPlan:
         """
@@ -301,7 +425,8 @@ class Planner:
                 total_estimated_time=0,
                 strategy="empty",
                 batches=[],
-                summary="No files to process"
+                summary="No files to process",
+                note_structure_plan={}
             )
         
         # 如果有内容简述，进行智能过滤和合并建议
@@ -361,32 +486,44 @@ class Planner:
         
         # 合并用户指定的合并组到聚类结果中
         all_files = clustered_files + individual_files + merge_groups
-        
+
+        # 可选插入全局概览任务
+        overview_file = self._build_global_overview_cluster(all_files)
+        if overview_file:
+            all_files.insert(0, overview_file)
+
         # 按优先级排序
-        all_files.sort(key=lambda f: (f.processing_priority, -f.size))
-        
+        sorted_files = sorted(all_files, key=lambda f: (f.processing_priority, -f.estimated_cost))
+
+        # 为每个文件规划输出目录
+        self._assign_note_structure(sorted_files)
+
+        # 基于全部文件摘要/标签生成笔记结构建议
+        note_structure_plan = self._llm_design_note_structure(sorted_files)
+
         # 分批处理
-        batches = self._create_batches(all_files)
-        
+        batches = self._create_batches(sorted_files)
+
         # 计算总成本
-        total_cost = sum(f.estimated_cost for f in all_files)
-        total_time = sum(f.estimated_time for f in all_files)
-        
+        total_cost = sum(f.estimated_cost for f in sorted_files)
+        total_time = sum(f.estimated_time for f in sorted_files)
+
         # 生成策略摘要
-        strategy = self._determine_strategy(all_files)
-        
+        strategy = self._determine_strategy(sorted_files)
+
         # 生成计划摘要
-        summary = self._generate_plan_summary(all_files, batches, strategy)
+        summary = self._generate_summary(sorted_files, batches, total_cost, total_time)
         
         self.stats["total_estimated_cost"] = total_cost
         
         return ProcessingPlan(
-            total_files=len(all_files),
+            total_files=len(sorted_files),
             total_estimated_cost=total_cost,
             total_estimated_time=total_time,
             strategy=strategy,
             batches=batches,
-            summary=summary
+            summary=summary,
+            note_structure_plan=note_structure_plan,
         )
     
     def _apply_content_briefs(self, files: List[FileInfo], briefs: List[ContentBrief]) -> tuple:
@@ -466,7 +603,7 @@ class Planner:
             )
             merge_file_infos.append(merge_info)
         
-        self._log(f"Content brief filtering: {skipped_count} skipped, {len(merge_file_infos)} merge groups created")
+        print(f"Content brief filtering: {skipped_count} skipped, {len(merge_file_infos)} merge groups created")
         
         return filtered_files, merge_file_infos
     
@@ -482,46 +619,6 @@ class Planner:
         
         # 使用文件类型
         return f"filetype_{file_info.type}"
-
-        overview_file = self._build_global_overview_cluster(files)
-        if overview_file:
-            clustered_files.insert(0, overview_file)
-        
-        # 合并所有待处理文件
-        all_files = clustered_files + individual_files
-        
-        # 按优先级排序
-        sorted_files = sorted(all_files, key=lambda f: (
-            f.processing_priority,
-            -f.estimated_cost,  # 成本高的优先（大文件优先）
-        ))
-
-        # 为每个文件规划笔记目录结构
-        self._assign_note_structure(sorted_files)
-        
-        # 分批处理
-        batches = self._create_batches(sorted_files)
-        
-        # 计算总计
-        total_cost = sum(f.estimated_cost for f in all_files)
-        total_time = sum(f.estimated_time for f in all_files)
-        
-        # 生成策略名称
-        strategy = self._determine_strategy(all_files)
-        
-        # 生成摘要
-        summary = self._generate_summary(all_files, batches, total_cost, total_time)
-        
-        self.stats["total_estimated_cost"] = total_cost
-        
-        return ProcessingPlan(
-            total_files=len(all_files),
-            total_estimated_cost=total_cost,
-            total_estimated_time=total_time,
-            strategy=strategy,
-            batches=batches,
-            summary=summary
-        )
 
     def _build_global_overview_cluster(self, files: List[FileInfo]) -> Optional[FileInfo]:
         """为一批文件生成全局知识地图任务。"""
@@ -653,6 +750,105 @@ class Planner:
             f"Estimated cost: {total_cost:.0f} tokens, "
             f"Estimated time: {total_time:.1f}s"
         )
+
+    def _llm_design_note_structure(self, files: List[FileInfo]) -> Dict[str, Any]:
+        """基于文件摘要与标签生成笔记结构建议。"""
+        if not files:
+            return {}
+
+        # 没有可用 LLM 时，返回规则推导的结构建议
+        if not self.content_analyzer:
+            return self._fallback_note_structure_plan(files)
+
+        sample_rows = []
+        for item in files[:120]:
+            sample_rows.append({
+                "path": str(item.path),
+                "type": item.type,
+                "tags": item.metadata.get("content_tags", []),
+                "summary": item.metadata.get("content_summary", ""),
+                "learning_value": item.metadata.get("has_learning_value", False),
+                "note_subdir": item.metadata.get("note_subdir", ""),
+            })
+
+        prompt = (
+            "You are an information architecture expert. "
+            "Design a practical note folder structure based on file briefs/tags and current hierarchy settings.\n\n"
+            f"Hierarchy levels config: {self.note_organization.get('levels', [])}\n"
+            f"Categories mapping: {self.categories}\n"
+            "File samples (JSON):\n"
+            f"{json.dumps(sample_rows, ensure_ascii=False)}\n\n"
+            "Return ONLY JSON with this schema:\n"
+            "{\n"
+            "  \"recommended_roots\": [\"root1\", \"root2\"],\n"
+            "  \"folders\": [{\"path\": \"scene/para\", \"reason\": \"...\", \"priority\": \"high|medium|low\"}],\n"
+            "  \"study_queue\": [{\"path\": \"...\", \"reason\": \"...\", \"score\": 0.0}],\n"
+            "  \"guidelines\": [\"...\"]\n"
+            "}"
+        )
+
+        try:
+            response_text = self.content_analyzer.llm_provider.complete(prompt)
+            parsed = self._parse_json_object(response_text)
+            if isinstance(parsed, dict):
+                parsed["source"] = "llm"
+                parsed["generated_at"] = datetime.now().isoformat()
+                return parsed
+        except Exception as e:
+            print(f"Warning: note structure LLM design failed: {e}")
+
+        return self._fallback_note_structure_plan(files)
+
+    def _fallback_note_structure_plan(self, files: List[FileInfo]) -> Dict[str, Any]:
+        """无 LLM 时基于已有规划结果生成结构建议。"""
+        folder_counts: Dict[str, int] = {}
+        study_queue: List[Dict[str, Any]] = []
+
+        for item in files:
+            subdir = item.metadata.get("note_subdir", "") or "Resources"
+            folder_counts[subdir] = folder_counts.get(subdir, 0) + 1
+            if item.metadata.get("has_learning_value"):
+                study_queue.append({
+                    "path": str(item.path),
+                    "reason": item.metadata.get("learning_reasoning", "high learning value"),
+                    "score": float(item.metadata.get("learning_value_score", 0.0)),
+                })
+
+        folders = [
+            {"path": key, "reason": f"contains {count} files", "priority": "high" if count >= 5 else "medium"}
+            for key, count in sorted(folder_counts.items(), key=lambda kv: kv[1], reverse=True)
+        ]
+        study_queue.sort(key=lambda item: item["score"], reverse=True)
+
+        return {
+            "source": "fallback",
+            "generated_at": datetime.now().isoformat(),
+            "recommended_roots": list(dict.fromkeys(part.split("/")[0] for part in folder_counts.keys() if part)),
+            "folders": folders,
+            "study_queue": study_queue[:30],
+            "guidelines": [
+                "Prioritize folders with dense high-value files.",
+                "Keep low-value transient files out of weekly study queue.",
+                "Use scene/para defaults when tags are sparse.",
+            ],
+        }
+
+    def _parse_json_object(self, content: str) -> Dict[str, Any]:
+        """从 LLM 文本中解析 JSON 对象。"""
+        try:
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+
+        code_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", content, re.DOTALL)
+        if code_match:
+            return json.loads(code_match.group(1))
+
+        brace_match = re.search(r"\{.*\}", content, re.DOTALL)
+        if brace_match:
+            return json.loads(brace_match.group(0))
+
+        raise ValueError("No valid JSON object found")
 
     def _assign_note_structure(self, files: List[FileInfo]):
         """为每个文件规划 note_subdir。

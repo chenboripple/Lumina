@@ -409,6 +409,19 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
     executor_llm_config = json.loads(executor_llm) if executor_llm else None
     validator_llm_config = json.loads(validator_llm) if validator_llm else None
     
+    # 构建运行时默认 LLM 配置（包含 api_key；to_dict 会过滤敏感字段）
+    runtime_llm_default = {
+        "provider": lumina_config.llm.provider,
+        "base_url": lumina_config.llm.base_url,
+        "api_key": lumina_config.llm.api_key,
+        "model": lumina_config.llm.model,
+        "temperature": lumina_config.llm.temperature,
+        "max_tokens": lumina_config.llm.max_tokens,
+        "timeout": lumina_config.llm.timeout,
+        "max_retries": lumina_config.llm.max_retries,
+        "retry_delay": lumina_config.llm.retry_delay,
+    }
+
     # 构建 Harness 配置
     harness_config = HarnessConfig(
         max_iterations=lumina_config.harness.get("max_iterations", 3),
@@ -422,7 +435,7 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
         incremental=incremental,
         parallel=parallel,
         enable_vector_store=vector,
-        llm_config=lumina_config.llm.to_dict(),  # 默认配置
+        llm_config=runtime_llm_default,  # 默认配置
         llm_config_planner=planner_llm_config or lumina_config.llm_planner,
         llm_config_executor=executor_llm_config or lumina_config.llm_executor,
         llm_config_validator=validator_llm_config or lumina_config.llm_validator,
@@ -511,6 +524,18 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
             "~/.lumina/lumina.yaml 中未配置 input.sources，无法启动常驻服务。"
         )
 
+    runtime_llm_default = {
+        "provider": lumina_config.llm.provider,
+        "base_url": lumina_config.llm.base_url,
+        "api_key": lumina_config.llm.api_key,
+        "model": lumina_config.llm.model,
+        "temperature": lumina_config.llm.temperature,
+        "max_tokens": lumina_config.llm.max_tokens,
+        "timeout": lumina_config.llm.timeout,
+        "max_retries": lumina_config.llm.max_retries,
+        "retry_delay": lumina_config.llm.retry_delay,
+    }
+
     harness_config = HarnessConfig(
         max_iterations=lumina_config.harness.get("max_iterations", 3),
         quality_threshold=threshold or lumina_config.harness.get("quality_threshold", 0.8),
@@ -523,7 +548,7 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
         incremental=True,
         parallel=parallel,
         enable_vector_store=vector,
-        llm_config=lumina_config.llm.to_dict(),
+        llm_config=runtime_llm_default,
         llm_config_planner=lumina_config.llm_planner,
         llm_config_executor=lumina_config.llm_executor,
         llm_config_validator=lumina_config.llm_validator,

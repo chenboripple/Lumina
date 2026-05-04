@@ -6,6 +6,7 @@ Harness - 智能核心协调器 (Agent 增强版)
 import json
 import time
 import re
+import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from .cache import CacheManager
 from .history import HistoryManager, ProcessingRecord
 from .vector_store import VectorStore, KnowledgeGraph, SemanticSearchEngine
 from .plugins import get_plugin, NoteData
+from .content_analyzer import ContentAnalyzer
 from .core.multimodal_extractor import MultimodalExtractor
 from .core.file_change_tracker import FileChangeTracker
 from .utils.progress import ProgressTracker, BatchProgressTracker
@@ -95,6 +97,10 @@ class HarnessConfig:
         Returns:
             对应 Agent 的 LLM 配置字典
         """
+        # analyzer 默认沿用 planner 配置，避免单独未配置时退化到缺少 key 的默认项。
+        if agent_name == "analyzer" and self.llm_config_planner:
+            return {**self.llm_config, **self.llm_config_planner}
+
         agent_config_attr = f"llm_config_{agent_name}"
         agent_config = getattr(self, agent_config_attr, None)
 
@@ -112,6 +118,9 @@ class HarnessState:
     start_time: float = field(default_factory=time.time)
     end_time: Optional[float] = None
     total_files: int = 0
+    scanned_files: int = 0
+    changed_files: int = 0
+    in_progress_files: int = 0
     processed_files: int = 0
     skipped_files: int = 0
     failed_files: int = 0
@@ -149,6 +158,7 @@ class Harness:
     def __init__(self, config: HarnessConfig = None):
         self.config = config or HarnessConfig()
         self.state = HarnessState()
+        self._state_lock = threading.Lock()
         
         # 初始化核心组件
         self.cache = CacheManager() if self.config.use_cache else None
@@ -184,11 +194,17 @@ class Harness:
         # 初始化内容预分析器
         self.content_analyzer = None
         if self.config.enable_content_analyzer:
-            self.content_analyzer = ContentAnalyzer(
-                llm_config=self.config.get_llm_config_for('analyzer'),
-                cache_manager=self.cache,
-                max_content_length=self.config.content_analyzer_max_length
-            )
+            try:
+                self.content_analyzer = ContentAnalyzer(
+                    llm_config=self.config.get_llm_config_for('analyzer'),
+                    cache_manager=self.cache,
+                    max_content_length=self.config.content_analyzer_max_length
+                )
+            except Exception as e:
+                # 分析器初始化失败时降级，不阻塞主处理流程。
+                self.content_analyzer = None
+                self.config.enable_content_analyzer = False
+                self._log(f"⚠️  ContentAnalyzer disabled: {e}", level="warning")
         
         # 初始化插件
         self.plugin = get_plugin(self.config.plugin)
@@ -368,6 +384,7 @@ class Harness:
                 supported_extensions=self.config.supported_extensions,
             )
             self.state.total_files = len(files)
+            self.state.scanned_files = len(files)
             self._log(f"📊 Found {len(files)} files total")
             
             # 更新进度追踪器总文件数
@@ -380,9 +397,13 @@ class Harness:
                     self.progress_tracker.set_phase("incremental_filter")
                 
                 files = self._filter_incremental(files)
+                self.state.changed_files = len(files)
                 self._log(f"⚡ {len(files)} files need processing (incremental mode)")
+            else:
+                self.state.changed_files = len(files)
             
             if not files:
+                self.state.in_progress_files = 0
                 self._log("✅ No files need processing, exiting")
                 return self._generate_final_report([])
             
@@ -522,6 +543,8 @@ class Harness:
         """串行处理批次"""
         results = []
         for file_info in batch:
+            with self._state_lock:
+                self.state.in_progress_files = 1
             try:
                 result = self._process_single(file_info, plan)
                 results.append(result)
@@ -532,11 +555,16 @@ class Harness:
                 error_msg = f"Failed to process {file_info.path}: {e}"
                 self.state.errors.append({"file": str(file_info.path), "error": str(e)})
                 self._log(f"❌ {error_msg}", level="error")
+            finally:
+                with self._state_lock:
+                    self.state.in_progress_files = 0
         return results
     
     def _process_batch_parallel(self, batch: List[FileInfo], plan) -> List[Dict[str, Any]]:
         """并行处理批次"""
         results = []
+        with self._state_lock:
+            self.state.in_progress_files = len(batch)
         
         with ThreadPoolExecutor(max_workers=self.config.max_workers) as executor:
             futures = {executor.submit(self._process_single, file_info, plan): file_info 
@@ -554,6 +582,9 @@ class Harness:
                     error_msg = f"Failed to process {file_info.path}: {e}"
                     self.state.errors.append({"file": str(file_info.path), "error": str(e)})
                     self._log(f"❌ {error_msg}", level="error")
+                finally:
+                    with self._state_lock:
+                        self.state.in_progress_files = max(0, self.state.in_progress_files - 1)
         
         return results
     
@@ -1466,6 +1497,9 @@ class Harness:
             "session_id": self.state.session_id,
             "status": self.state.status,
             "total_files": self.state.total_files,
+            "scanned_files": self.state.scanned_files,
+            "changed_files": self.state.changed_files,
+            "in_progress_files": self.state.in_progress_files,
             "processed_files": self.state.processed_files,
             "skipped_files": self.state.skipped_files,
             "failed_files": self.state.failed_files,

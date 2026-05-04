@@ -231,6 +231,9 @@ function renderScanStatus(status) {
                         <div class="queue-message">${escapeHtml(message || '可再次开始扫描')}</div>
                     </div>
                     <div class="queue-counters secondary">
+                        <span>已扫描 ${fileCounts.scanned || fileCounts.total || 0}</span>
+                        <span>有变化 ${fileCounts.changed || fileCounts.total || 0}</span>
+                        <span>处理中 ${fileCounts.in_progress || 0}</span>
                         <span>成功 ${fileCounts.processed || 0}</span>
                         <span>失败 ${fileCounts.failed || 0}</span>
                         <span>跳过 ${fileCounts.skipped || 0}</span>
@@ -276,6 +279,10 @@ function renderScanStatus(status) {
             </div>
             <div class="queue-counters tertiary">
                 <span>已耗时 ${formatDuration(elapsedSeconds)}</span>
+                <span>已扫描 ${fileCounts.scanned || fileCounts.total || 0}</span>
+                <span>有变化 ${fileCounts.changed || fileCounts.total || 0}</span>
+                <span>处理中 ${fileCounts.in_progress || 0}</span>
+                <span>已完成 ${fileCounts.completed || 0}</span>
             </div>
             ${currentSource ? `<div class="queue-current">当前: ${escapeHtml(currentSource)}</div>` : ''}
             ${failedItems.length ? `
