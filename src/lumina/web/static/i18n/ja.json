@@ -1,0 +1,115 @@
+{
+  "meta": { "title": "Lumina - ナレッジ管理" },
+  "nav": {
+    "dashboard": "ダッシュボード",
+    "search": "検索",
+    "graph": "ナレッジグラフ",
+    "notes": "ノート",
+    "config": "設定"
+  },
+  "locale": { "label": "言語" },
+  "view": {
+    "dashboard": { "title": "📊 ダッシュボード" },
+    "search": { "title": "🔍 セマンティック検索" },
+    "graph": { "title": "🕸️ ナレッジグラフ" },
+    "notes": { "title": "📝 ノート" },
+    "config": { "title": "⚙️ 設定" }
+  },
+  "action": {
+    "scan": "スキャン",
+    "batch_repair": "一括修復",
+    "refresh": "更新",
+    "search": "検索",
+    "close": "閉じる",
+    "regenerate": "再生成",
+    "export": "エクスポート",
+    "delete": "削除"
+  },
+  "scan": {
+    "running": "処理中...",
+    "waiting": "待機中...",
+    "last_run_failed": "前回実行で失敗あり",
+    "last_run_completed": "前回実行は完了",
+    "not_started": "未開始",
+    "current_source": "現在: {source}",
+    "counter": {
+      "elapsed": "経過 {value}",
+      "scanned": "スキャン済み {count}",
+      "changed": "変更あり {count}",
+      "in_progress": "処理中 {count}",
+      "processed": "成功 {count}",
+      "completed": "完了 {count}",
+      "failed": "失敗 {count}",
+      "skipped": "スキップ {count}",
+      "total": "合計 {count}"
+    }
+  },
+  "queue": {
+    "badge": {
+      "pending": "待機",
+      "processing": "処理中",
+      "completed": "完了",
+      "failed": "失敗"
+    }
+  },
+  "failure": {
+    "modal": { "title": "失敗詳細" },
+    "select_all": "すべて選択",
+    "view_details": "失敗詳細を見る ({count})"
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "現在の設定",
+        "hint": "現在のユーザー設定をここで確認・編集できます。",
+        "snapshot": "有効設定スナップショット",
+        "raw_yaml": "ユーザー設定 YAML（編集可）",
+        "empty_yaml": "# ユーザー設定は空です"
+      },
+      "system": {
+        "title": "システム設定",
+        "schema_version": "Schema バージョン",
+        "supported_agents": "対応 Agents",
+        "planner_default_para": "Planner 既定 PARA",
+        "runtime_status": "実行状態",
+        "current_session": "現在のセッション",
+        "current_output_dir": "現在の出力先",
+        "log_retention_days": "ログ保持日数"
+      },
+      "agent": {
+        "title": "Agent 設定",
+        "max_iterations": "Harness 最大反復回数",
+        "quality_threshold": "Harness 品質しきい値",
+        "incremental": "増分処理",
+        "parallel": "並列処理",
+        "max_workers": "並列 worker 数",
+        "enable_vector_store": "ベクトルストアを有効化",
+        "llm_shared": "共有 LLM 設定（JSON）",
+        "llm_planner": "Planner LLM 上書き（JSON）",
+        "llm_executor": "Executor LLM 上書き（JSON）",
+        "llm_validator": "Validator LLM 上書き（JSON）"
+      },
+      "user": {
+        "title": "ユーザー設定",
+        "default_recursive": "入力ソースの再帰を既定で有効",
+        "supported_extensions": "対応拡張子（JSON Array）",
+        "input_sources": "入力ソース一覧（JSON）",
+        "output_plugin": "出力プラグイン",
+        "output_dir": "出力ディレクトリ",
+        "vault_path": "Vault パス",
+        "output_structure": "出力構造（JSON）",
+        "naming_rules": "命名ルール（JSON）",
+        "note_organization": "ノート整理ルール（JSON）"
+      },
+      "actions": {
+        "save_yaml": "YAML 設定を保存",
+        "save_all": "すべての設定を保存"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours}時間 {minutes}分",
+    "minutes_seconds": "{minutes}分 {seconds}秒",
+    "seconds": "{seconds}秒"
+  }
+}

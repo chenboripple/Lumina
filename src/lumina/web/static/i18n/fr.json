@@ -1,0 +1,91 @@
+{
+  "meta": { "title": "Lumina - Gestion des connaissances" },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "search": "Recherche",
+    "graph": "Graphe de connaissances",
+    "notes": "Notes",
+    "config": "Configuration"
+  },
+  "locale": { "label": "Langue" },
+  "action": {
+    "scan": "Scanner",
+    "batch_repair": "Réparation en lot",
+    "refresh": "Actualiser",
+    "search": "Rechercher",
+    "close": "Fermer",
+    "regenerate": "Régénérer",
+    "export": "Exporter",
+    "delete": "Supprimer"
+  },
+  "scan": {
+    "running": "En cours...",
+    "waiting": "En attente...",
+    "counter": {
+      "elapsed": "Temps {value}",
+      "scanned": "Analysés {count}",
+      "changed": "Modifiés {count}",
+      "in_progress": "En cours {count}",
+      "processed": "Traités {count}",
+      "completed": "Terminés {count}",
+      "failed": "Échoués {count}",
+      "skipped": "Ignorés {count}",
+      "total": "Total {count}"
+    }
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "Configuration actuelle",
+        "hint": "Vous pouvez consulter et modifier la configuration utilisateur actuelle ici.",
+        "snapshot": "Instantané actif",
+        "raw_yaml": "YAML utilisateur (modifiable)",
+        "empty_yaml": "# Configuration utilisateur vide"
+      },
+      "system": {
+        "title": "Configuration système",
+        "schema_version": "Version du schéma",
+        "supported_agents": "Agents pris en charge",
+        "planner_default_para": "PARA par défaut du planner",
+        "runtime_status": "État d'exécution",
+        "current_session": "Session actuelle",
+        "current_output_dir": "Répertoire de sortie actuel",
+        "log_retention_days": "Jours de rétention des logs"
+      },
+      "agent": {
+        "title": "Configuration Agent",
+        "max_iterations": "Itérations max du Harness",
+        "quality_threshold": "Seuil de qualité du Harness",
+        "incremental": "Traitement incrémental",
+        "parallel": "Traitement parallèle",
+        "max_workers": "Nombre de workers",
+        "enable_vector_store": "Activer le store vectoriel",
+        "llm_shared": "Configuration LLM partagée (JSON)",
+        "llm_planner": "Surcharge LLM Planner (JSON)",
+        "llm_executor": "Surcharge LLM Executor (JSON)",
+        "llm_validator": "Surcharge LLM Validator (JSON)"
+      },
+      "user": {
+        "title": "Préférences utilisateur",
+        "default_recursive": "Récursif par défaut pour les sources",
+        "supported_extensions": "Extensions prises en charge (JSON Array)",
+        "input_sources": "Liste des sources d'entrée (JSON)",
+        "output_plugin": "Plugin de sortie",
+        "output_dir": "Répertoire de sortie",
+        "vault_path": "Chemin Vault",
+        "output_structure": "Structure de sortie (JSON)",
+        "naming_rules": "Règles de nommage (JSON)",
+        "note_organization": "Règles d'organisation des notes (JSON)"
+      },
+      "actions": {
+        "save_yaml": "Enregistrer la configuration YAML",
+        "save_all": "Enregistrer toute la configuration"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours} h {minutes} min",
+    "minutes_seconds": "{minutes} min {seconds} s",
+    "seconds": "{seconds} s"
+  }
+}

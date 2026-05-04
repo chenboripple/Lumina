@@ -1,0 +1,91 @@
+{
+  "meta": { "title": "Lumina - ज्ञान प्रबंधन" },
+  "nav": {
+    "dashboard": "डैशबोर्ड",
+    "search": "खोज",
+    "graph": "नॉलेज ग्राफ",
+    "notes": "नोट्स",
+    "config": "कॉन्फ़िग"
+  },
+  "locale": { "label": "भाषा" },
+  "action": {
+    "scan": "स्कैन",
+    "batch_repair": "बैच रिपेयर",
+    "refresh": "रिफ्रेश",
+    "search": "खोज",
+    "close": "बंद करें",
+    "regenerate": "पुनः बनाएं",
+    "export": "निर्यात",
+    "delete": "हटाएं"
+  },
+  "scan": {
+    "running": "प्रोसेस हो रहा है...",
+    "waiting": "प्रतीक्षा में...",
+    "counter": {
+      "elapsed": "समय {value}",
+      "scanned": "स्कैन {count}",
+      "changed": "परिवर्तित {count}",
+      "in_progress": "प्रगति में {count}",
+      "processed": "सफल {count}",
+      "completed": "पूर्ण {count}",
+      "failed": "विफल {count}",
+      "skipped": "छोड़ा गया {count}",
+      "total": "कुल {count}"
+    }
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "वर्तमान कॉन्फ़िगरेशन",
+        "hint": "आप यहां वर्तमान यूज़र कॉन्फ़िगरेशन देख और संपादित कर सकते हैं।",
+        "snapshot": "सक्रिय कॉन्फ़िग स्नैपशॉट",
+        "raw_yaml": "यूज़र कॉन्फ़िग YAML (संपादन योग्य)",
+        "empty_yaml": "# यूज़र कॉन्फ़िग खाली है"
+      },
+      "system": {
+        "title": "सिस्टम कॉन्फ़िगरेशन",
+        "schema_version": "Schema संस्करण",
+        "supported_agents": "समर्थित Agents",
+        "planner_default_para": "Planner डिफ़ॉल्ट PARA",
+        "runtime_status": "रनटाइम स्थिति",
+        "current_session": "वर्तमान सत्र",
+        "current_output_dir": "वर्तमान आउटपुट डायरेक्टरी",
+        "log_retention_days": "लॉग रखने के दिन"
+      },
+      "agent": {
+        "title": "Agent कॉन्फ़िगरेशन",
+        "max_iterations": "Harness अधिकतम iteration",
+        "quality_threshold": "Harness गुणवत्ता थ्रेशहोल्ड",
+        "incremental": "इन्क्रीमेंटल प्रोसेसिंग",
+        "parallel": "पैरेलल प्रोसेसिंग",
+        "max_workers": "worker संख्या",
+        "enable_vector_store": "वेक्टर स्टोर सक्षम करें",
+        "llm_shared": "शेयर्ड LLM कॉन्फ़िग (JSON)",
+        "llm_planner": "Planner LLM ओवरराइड (JSON)",
+        "llm_executor": "Executor LLM ओवरराइड (JSON)",
+        "llm_validator": "Validator LLM ओवरराइड (JSON)"
+      },
+      "user": {
+        "title": "यूज़र प्राथमिकताएँ",
+        "default_recursive": "इनपुट स्रोतों के लिए डिफ़ॉल्ट recursive",
+        "supported_extensions": "समर्थित एक्सटेंशन (JSON Array)",
+        "input_sources": "इनपुट स्रोत सूची (JSON)",
+        "output_plugin": "आउटपुट प्लगइन",
+        "output_dir": "आउटपुट डायरेक्टरी",
+        "vault_path": "Vault पाथ",
+        "output_structure": "आउटपुट संरचना (JSON)",
+        "naming_rules": "नामकरण नियम (JSON)",
+        "note_organization": "नोट संगठन नियम (JSON)"
+      },
+      "actions": {
+        "save_yaml": "YAML कॉन्फ़िग सहेजें",
+        "save_all": "सभी कॉन्फ़िगरेशन सहेजें"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours}घं {minutes}मि",
+    "minutes_seconds": "{minutes}मि {seconds}से",
+    "seconds": "{seconds}से"
+  }
+}

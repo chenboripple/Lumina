@@ -1,0 +1,91 @@
+{
+  "meta": { "title": "Lumina - إدارة المعرفة" },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "search": "بحث",
+    "graph": "رسم المعرفة",
+    "notes": "ملاحظات",
+    "config": "الإعدادات"
+  },
+  "locale": { "label": "اللغة" },
+  "action": {
+    "scan": "فحص",
+    "batch_repair": "إصلاح دفعي",
+    "refresh": "تحديث",
+    "search": "بحث",
+    "close": "إغلاق",
+    "regenerate": "إعادة توليد",
+    "export": "تصدير",
+    "delete": "حذف"
+  },
+  "scan": {
+    "running": "جارٍ المعالجة...",
+    "waiting": "في الانتظار...",
+    "counter": {
+      "elapsed": "المدة {value}",
+      "scanned": "تم الفحص {count}",
+      "changed": "تغيّر {count}",
+      "in_progress": "قيد التنفيذ {count}",
+      "processed": "نجاح {count}",
+      "completed": "مكتمل {count}",
+      "failed": "فشل {count}",
+      "skipped": "تم التجاوز {count}",
+      "total": "الإجمالي {count}"
+    }
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "الإعدادات الحالية",
+        "hint": "يمكنك عرض وتعديل إعدادات المستخدم الحالية هنا.",
+        "snapshot": "لقطة الإعدادات النشطة",
+        "raw_yaml": "إعدادات المستخدم YAML (قابلة للتحرير)",
+        "empty_yaml": "# إعدادات المستخدم فارغة"
+      },
+      "system": {
+        "title": "إعدادات النظام",
+        "schema_version": "إصدار المخطط",
+        "supported_agents": "Agents المدعومون",
+        "planner_default_para": "PARA الافتراضي للـ planner",
+        "runtime_status": "حالة التشغيل",
+        "current_session": "الجلسة الحالية",
+        "current_output_dir": "مجلد الإخراج الحالي",
+        "log_retention_days": "أيام الاحتفاظ بالسجلات"
+      },
+      "agent": {
+        "title": "إعدادات Agent",
+        "max_iterations": "أقصى تكرارات Harness",
+        "quality_threshold": "عتبة جودة Harness",
+        "incremental": "المعالجة التزايدية",
+        "parallel": "المعالجة المتوازية",
+        "max_workers": "عدد workers",
+        "enable_vector_store": "تمكين مخزن المتجهات",
+        "llm_shared": "إعدادات LLM المشتركة (JSON)",
+        "llm_planner": "تجاوز LLM لـ Planner (JSON)",
+        "llm_executor": "تجاوز LLM لـ Executor (JSON)",
+        "llm_validator": "تجاوز LLM لـ Validator (JSON)"
+      },
+      "user": {
+        "title": "تفضيلات المستخدم",
+        "default_recursive": "التكرار الافتراضي لمصادر الإدخال",
+        "supported_extensions": "الامتدادات المدعومة (JSON Array)",
+        "input_sources": "قائمة مصادر الإدخال (JSON)",
+        "output_plugin": "إضافة الإخراج",
+        "output_dir": "مجلد الإخراج",
+        "vault_path": "مسار Vault",
+        "output_structure": "بنية الإخراج (JSON)",
+        "naming_rules": "قواعد التسمية (JSON)",
+        "note_organization": "قواعد تنظيم الملاحظات (JSON)"
+      },
+      "actions": {
+        "save_yaml": "حفظ إعدادات YAML",
+        "save_all": "حفظ جميع الإعدادات"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours}س {minutes}د",
+    "minutes_seconds": "{minutes}د {seconds}ث",
+    "seconds": "{seconds}ث"
+  }
+}

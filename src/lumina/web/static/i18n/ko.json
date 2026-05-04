@@ -1,0 +1,107 @@
+{
+  "meta": { "title": "Lumina - 지식 관리" },
+  "nav": {
+    "dashboard": "대시보드",
+    "search": "검색",
+    "graph": "지식 그래프",
+    "notes": "노트",
+    "config": "설정"
+  },
+  "locale": { "label": "언어" },
+  "view": {
+    "dashboard": { "title": "📊 대시보드" },
+    "search": { "title": "🔍 의미 검색" },
+    "graph": { "title": "🕸️ 지식 그래프" },
+    "notes": { "title": "📝 노트" },
+    "config": { "title": "⚙️ 설정" }
+  },
+  "action": {
+    "scan": "스캔",
+    "batch_repair": "일괄 복구",
+    "refresh": "새로고침",
+    "search": "검색",
+    "close": "닫기",
+    "regenerate": "재생성",
+    "export": "내보내기",
+    "delete": "삭제"
+  },
+  "scan": {
+    "running": "처리 중...",
+    "waiting": "대기 중...",
+    "last_run_failed": "지난 실행에 실패 항목이 있습니다",
+    "last_run_completed": "최근 실행 완료",
+    "not_started": "시작 전",
+    "current_source": "현재: {source}",
+    "counter": {
+      "elapsed": "경과 {value}",
+      "scanned": "스캔됨 {count}",
+      "changed": "변경됨 {count}",
+      "in_progress": "진행 중 {count}",
+      "processed": "성공 {count}",
+      "completed": "완료 {count}",
+      "failed": "실패 {count}",
+      "skipped": "건너뜀 {count}",
+      "total": "합계 {count}"
+    }
+  },
+  "failure": {
+    "modal": { "title": "실패 상세" },
+    "select_all": "전체 선택",
+    "view_details": "실패 상세 보기 ({count})"
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "현재 구성",
+        "hint": "현재 사용자 구성을 여기에서 확인하고 편집할 수 있습니다.",
+        "snapshot": "활성 구성 스냅샷",
+        "raw_yaml": "사용자 구성 YAML(편집 가능)",
+        "empty_yaml": "# 사용자 구성이 비어 있습니다"
+      },
+      "system": {
+        "title": "시스템 구성",
+        "schema_version": "스키마 버전",
+        "supported_agents": "지원 Agents",
+        "planner_default_para": "Planner 기본 PARA",
+        "runtime_status": "런타임 상태",
+        "current_session": "현재 세션",
+        "current_output_dir": "현재 출력 디렉터리",
+        "log_retention_days": "로그 보관 일수"
+      },
+      "agent": {
+        "title": "Agent 구성",
+        "max_iterations": "Harness 최대 반복 횟수",
+        "quality_threshold": "Harness 품질 임계값",
+        "incremental": "증분 처리",
+        "parallel": "병렬 처리",
+        "max_workers": "병렬 worker 수",
+        "enable_vector_store": "벡터 저장소 활성화",
+        "llm_shared": "공유 LLM 구성(JSON)",
+        "llm_planner": "Planner LLM 오버라이드(JSON)",
+        "llm_executor": "Executor LLM 오버라이드(JSON)",
+        "llm_validator": "Validator LLM 오버라이드(JSON)"
+      },
+      "user": {
+        "title": "사용자 설정",
+        "default_recursive": "입력 소스 기본 재귀",
+        "supported_extensions": "지원 확장자(JSON Array)",
+        "input_sources": "입력 소스 목록(JSON)",
+        "output_plugin": "출력 플러그인",
+        "output_dir": "출력 디렉터리",
+        "vault_path": "Vault 경로",
+        "output_structure": "출력 구조(JSON)",
+        "naming_rules": "이름 규칙(JSON)",
+        "note_organization": "노트 구성 규칙(JSON)"
+      },
+      "actions": {
+        "save_yaml": "YAML 구성 저장",
+        "save_all": "전체 구성 저장"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours}시간 {minutes}분",
+    "minutes_seconds": "{minutes}분 {seconds}초",
+    "seconds": "{seconds}초"
+  }
+}

@@ -1,0 +1,133 @@
+{
+  "meta": { "title": "Lumina - 知識管理" },
+  "nav": {
+    "dashboard": "儀表板",
+    "search": "搜尋",
+    "graph": "知識圖譜",
+    "notes": "筆記管理",
+    "config": "設定"
+  },
+  "locale": { "label": "語言" },
+  "view": {
+    "dashboard": { "title": "📊 儀表板" },
+    "search": { "title": "🔍 語意搜尋" },
+    "graph": { "title": "🕸️ 知識圖譜" },
+    "notes": { "title": "📝 筆記管理" },
+    "config": { "title": "⚙️ 設定" }
+  },
+  "stats": {
+    "total_notes": "總筆記數",
+    "processed_files": "處理檔案數",
+    "avg_score": "平均品質",
+    "vector_docs": "向量文件"
+  },
+  "action": {
+    "scan": "掃描",
+    "batch_repair": "批次修復",
+    "refresh": "重新整理",
+    "search": "搜尋",
+    "close": "關閉",
+    "regenerate": "重新產生",
+    "export": "匯出",
+    "delete": "刪除"
+  },
+  "scan": {
+    "running": "處理中...",
+    "waiting": "等待處理...",
+    "last_run_failed": "上次執行有失敗",
+    "last_run_completed": "最近一次已完成",
+    "not_started": "尚未開始",
+    "current_source": "目前: {source}",
+    "status": {
+      "processing": "處理中",
+      "stopped": "已停止"
+    },
+    "counter": {
+      "elapsed": "已耗時 {value}",
+      "scanned": "已掃描 {count}",
+      "changed": "有變更 {count}",
+      "in_progress": "處理中 {count}",
+      "processed": "成功 {count}",
+      "completed": "已完成 {count}",
+      "failed": "失敗 {count}",
+      "skipped": "略過 {count}",
+      "total": "總計 {count}"
+    }
+  },
+  "queue": {
+    "badge": {
+      "pending": "待處理",
+      "processing": "處理中",
+      "completed": "已完成",
+      "failed": "有失敗"
+    },
+    "meta": { "total_completed": "總數 {total}，完成 {completed}" },
+    "counter": {
+      "processed": "processed {count}",
+      "failed": "failed {count}",
+      "skipped": "skipped {count}"
+    }
+  },
+  "failure": {
+    "modal": { "title": "失敗詳情" },
+    "select_all": "全選",
+    "batch_tag": "批次加標籤",
+    "batch_regenerate": "批次重產生",
+    "view_details": "查看失敗詳情 ({count})"
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "目前已設定內容",
+        "hint": "可直接檢視並編輯目前使用者設定；分組輸入框會自動帶入當前生效值。",
+        "snapshot": "目前生效設定快照",
+        "raw_yaml": "使用者設定原文（YAML，可直接編輯）",
+        "empty_yaml": "# 目前沒有設定檔內容"
+      },
+      "system": {
+        "title": "系統設定（固定/執行中）",
+        "schema_version": "Schema 版本",
+        "supported_agents": "支援 Agents",
+        "planner_default_para": "Planner 預設 PARA",
+        "runtime_status": "執行狀態",
+        "current_session": "目前會話",
+        "current_output_dir": "目前輸出目錄",
+        "log_retention_days": "日誌保留天數"
+      },
+      "agent": {
+        "title": "Agent 設定（可調整）",
+        "max_iterations": "Harness 最大迭代次數",
+        "quality_threshold": "Harness 品質閾值",
+        "incremental": "增量處理",
+        "parallel": "平行處理",
+        "max_workers": "平行 worker 數",
+        "enable_vector_store": "啟用向量儲存",
+        "llm_shared": "共用 LLM 設定（JSON）",
+        "llm_planner": "Planner LLM 覆寫（JSON）",
+        "llm_executor": "Executor LLM 覆寫（JSON）",
+        "llm_validator": "Validator LLM 覆寫（JSON）"
+      },
+      "user": {
+        "title": "使用者個人化設定",
+        "default_recursive": "輸入來源預設遞迴",
+        "supported_extensions": "支援副檔名（JSON 陣列）",
+        "input_sources": "輸入來源清單（JSON）",
+        "output_plugin": "輸出外掛",
+        "output_dir": "輸出目錄",
+        "vault_path": "Vault 路徑",
+        "output_structure": "輸出結構（JSON）",
+        "naming_rules": "命名規則（JSON）",
+        "note_organization": "筆記組織規則（JSON）"
+      },
+      "actions": {
+        "save_yaml": "儲存 YAML 設定",
+        "save_all": "儲存全部設定"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours}小時 {minutes}分",
+    "minutes_seconds": "{minutes}分 {seconds}秒",
+    "seconds": "{seconds}秒"
+  }
+}

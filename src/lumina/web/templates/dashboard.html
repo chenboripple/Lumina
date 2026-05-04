@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lumina - 知识管理</title>
+    <title data-i18n="meta.title">Lumina - Knowledge Management</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet">
@@ -19,11 +19,15 @@
                 <span class="logo-text">Lumina</span>
             </div>
             <div class="nav-links">
-                <button class="nav-btn active" data-view="dashboard">仪表板</button>
-                <button class="nav-btn" data-view="search">搜索</button>
-                <button class="nav-btn" data-view="graph">知识图谱</button>
-                <button class="nav-btn" data-view="notes">笔记管理</button>
-                <button class="nav-btn" data-view="config">配置</button>
+                <button class="nav-btn active" data-view="dashboard" data-i18n="nav.dashboard">仪表板</button>
+                <button class="nav-btn" data-view="search" data-i18n="nav.search">搜索</button>
+                <button class="nav-btn" data-view="graph" data-i18n="nav.graph">知识图谱</button>
+                <button class="nav-btn" data-view="notes" data-i18n="nav.notes">笔记管理</button>
+                <button class="nav-btn" data-view="config" data-i18n="nav.config">配置</button>
+            </div>
+            <div class="nav-controls">
+                <label class="locale-label" for="locale-selector" data-i18n="locale.label">Language</label>
+                <select id="locale-selector" class="locale-selector" aria-label="Language selector"></select>
             </div>
         </nav>
 
@@ -31,7 +35,7 @@
         <main class="main-content">
             <!-- 仪表板视图 -->
             <div id="dashboard-view" class="view active">
-                <h1 class="page-title">📊 仪表板</h1>
+                <h1 class="page-title" data-i18n="view.dashboard.title">📊 仪表板</h1>
                 
                 <!-- 统计卡片 -->
                 <div class="stats-grid">
@@ -39,85 +43,85 @@
                         <div class="stat-icon">📝</div>
                         <div class="stat-content">
                             <div class="stat-value" id="stat-notes">0</div>
-                            <div class="stat-label">总笔记数</div>
+                            <div class="stat-label" data-i18n="stats.total_notes">总笔记数</div>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">✅</div>
                         <div class="stat-content">
                             <div class="stat-value" id="stat-processed">0</div>
-                            <div class="stat-label">处理文件数</div>
+                            <div class="stat-label" data-i18n="stats.processed_files">处理文件数</div>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">⭐</div>
                         <div class="stat-content">
                             <div class="stat-value" id="stat-score">0.00</div>
-                            <div class="stat-label">平均质量</div>
+                            <div class="stat-label" data-i18n="stats.avg_score">平均质量</div>
                         </div>
                     </div>
                     <div class="stat-card">
                         <div class="stat-icon">🔮</div>
                         <div class="stat-content">
                             <div class="stat-value" id="stat-vector">0</div>
-                            <div class="stat-label">向量文档</div>
+                            <div class="stat-label" data-i18n="stats.vector_docs">向量文档</div>
                         </div>
                     </div>
                 </div>
 
                 <!-- 处理状态 -->
                 <div class="panel">
-                    <h2 class="panel-title">📌 处理状态</h2>
+                    <h2 class="panel-title" data-i18n="panel.processing_status">📌 处理状态</h2>
                     <div id="status-display">
-                        <p class="status-idle">等待处理...</p>
+                        <p class="status-idle" data-i18n="scan.waiting">等待处理...</p>
                     </div>
                 </div>
 
                 <div class="panel">
-                    <h2 class="panel-title">🗂️ 全部已处理原文件</h2>
+                    <h2 class="panel-title" data-i18n="panel.processed_files">🗂️ 全部已处理原文件</h2>
                     <div id="processed-files-list">
-                        <p class="hint">暂无记录</p>
+                        <p class="hint" data-i18n="common.no_records">暂无记录</p>
                     </div>
                 </div>
 
                 <!-- 快速操作 -->
                 <div class="panel">
-                    <h2 class="panel-title">⚡ 快速操作</h2>
+                    <h2 class="panel-title" data-i18n="panel.quick_actions">⚡ 快速操作</h2>
                     <div class="quick-actions">
-                        <button class="btn btn-primary" id="btn-scan">扫描目录</button>
-                        <button class="btn btn-warning" id="btn-batch-repair">批量修复</button>
-                        <button class="btn btn-secondary" id="btn-refresh">刷新数据</button>
+                        <button class="btn btn-primary" id="btn-scan" data-i18n="action.scan">扫描目录</button>
+                        <button class="btn btn-warning" id="btn-batch-repair" data-i18n="action.batch_repair">批量修复</button>
+                        <button class="btn btn-secondary" id="btn-refresh" data-i18n="action.refresh">刷新数据</button>
                     </div>
                 </div>
             </div>
 
             <!-- 搜索视图 -->
             <div id="search-view" class="view">
-                <h1 class="page-title">🔍 语义搜索</h1>
+                <h1 class="page-title" data-i18n="view.search.title">🔍 语义搜索</h1>
                 
                 <div class="search-box">
-                    <input type="text" id="search-input" class="search-input" 
-                           placeholder="输入搜索内容...">
-                    <button class="btn btn-primary" id="btn-search">搜索</button>
+                          <input type="text" id="search-input" class="search-input" 
+                              placeholder="输入搜索内容..." data-i18n-placeholder="search.input_placeholder">
+                          <button class="btn btn-primary" id="btn-search" data-i18n="action.search">搜索</button>
                 </div>
                 
                 <div class="search-results" id="search-results">
-                    <p class="hint">输入关键词开始搜索</p>
+                    <p class="hint" data-i18n="search.start_hint">输入关键词开始搜索</p>
                 </div>
             </div>
 
             <!-- 知识图谱视图 -->
             <div id="graph-view" class="view">
-                <h1 class="page-title">🕸️ 知识图谱</h1>
+                <h1 class="page-title" data-i18n="view.graph.title">🕸️ 知识图谱</h1>
                 
                 <div class="panel">
                     <div class="graph-controls">
                         <label>
-                            最小相似度:
+                            <span data-i18n="graph.min_similarity">最小相似度:</span>
                             <input type="range" id="similarity-slider" min="0.5" max="0.95" step="0.05" value="0.7">
                             <span id="similarity-value">0.7</span>
                         </label>
-                        <button class="btn btn-secondary" id="btn-refresh-graph">刷新</button>
+                        <button class="btn btn-secondary" id="btn-refresh-graph" data-i18n="action.refresh">刷新</button>
                     </div>
                     <div id="graph-container" class="graph-container"></div>
                 </div>
@@ -125,33 +129,34 @@
 
             <!-- 笔记管理视图 -->
             <div id="notes-view" class="view">
-                <h1 class="page-title">📝 笔记管理</h1>
+                <h1 class="page-title" data-i18n="view.notes.title">📝 笔记管理</h1>
 
                 <div class="panel">
-                    <h2 class="panel-title">🎯 按指定源文件重新生成</h2>
+                    <h2 class="panel-title" data-i18n="notes.regenerate_source_title">🎯 按指定源文件重新生成</h2>
                     <div class="source-regenerate-row">
                         <input
                             type="text"
                             id="source-file-input"
                             class="search-input"
                             placeholder="输入源文件绝对路径，例如 /Users/xxx/Desktop/xxx.txt"
+                            data-i18n-placeholder="notes.source_input_placeholder"
                         >
-                        <button class="btn btn-primary" id="btn-regenerate-source">重新生成该文件笔记</button>
+                        <button class="btn btn-primary" id="btn-regenerate-source" data-i18n="notes.regenerate_source_action">重新生成该文件笔记</button>
                     </div>
-                    <p class="hint source-regenerate-hint">仅支持当前 input.sources 配置范围内且扩展名受支持的源文件。</p>
+                    <p class="hint source-regenerate-hint" data-i18n="notes.source_regenerate_hint">仅支持当前 input.sources 配置范围内且扩展名受支持的源文件。</p>
                 </div>
                 
                 <div class="notes-grid" id="notes-grid">
-                    <p class="loading">加载中...</p>
+                    <p class="loading" data-i18n="common.loading">加载中...</p>
                 </div>
             </div>
 
             <!-- 配置视图 -->
             <div id="config-view" class="view">
-                <h1 class="page-title">⚙️ 配置</h1>
+                <h1 class="page-title" data-i18n="view.config.title">⚙️ 配置</h1>
                 
                 <div class="config-form" id="config-form">
-                    <p class="loading">加载配置...</p>
+                    <p class="loading" data-i18n="config.loading">加载配置...</p>
                 </div>
             </div>
         </main>
@@ -161,13 +166,13 @@
     <div id="note-modal" class="modal hidden">
         <div class="modal-content">
             <div class="modal-header">
-                <h2 id="modal-title">笔记详情</h2>
+                <h2 id="modal-title" data-i18n="notes.modal_title">笔记详情</h2>
                 <button class="modal-close" id="btn-close-modal">&times;</button>
             </div>
             <div class="modal-body" id="modal-body"></div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" id="btn-close-modal-2">关闭</button>
-                <button class="btn btn-primary" id="btn-regenerate">重新生成</button>
+                <button class="btn btn-secondary" id="btn-close-modal-2" data-i18n="action.close">关闭</button>
+                <button class="btn btn-primary" id="btn-regenerate" data-i18n="action.regenerate">重新生成</button>
             </div>
         </div>
     </div>
@@ -175,27 +180,27 @@
     <div id="failure-modal" class="modal hidden">
         <div class="modal-content modal-content-narrow">
             <div class="modal-header">
-                <h2>失败详情</h2>
+                <h2 data-i18n="failure.modal.title">失败详情</h2>
                 <button class="modal-close" id="btn-close-failure-modal">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="failure-toolbar">
                     <label class="failure-select-all">
                         <input type="checkbox" id="failure-select-all">
-                        <span>全选</span>
+                        <span data-i18n="failure.select_all">全选</span>
                     </label>
                     <div class="failure-toolbar-actions">
-                        <input type="text" id="failure-tag-input" class="form-input failure-tag-input" placeholder="输入标签，逗号分隔">
-                        <button class="btn btn-secondary btn-sm" id="btn-failure-tag">批量打标签</button>
-                        <button class="btn btn-secondary btn-sm" id="btn-failure-export">导出</button>
-                        <button class="btn btn-warning btn-sm" id="btn-failure-regenerate">批量重生成</button>
-                        <button class="btn btn-secondary btn-sm" id="btn-failure-delete">删除记录</button>
+                        <input type="text" id="failure-tag-input" class="form-input failure-tag-input" placeholder="输入标签，逗号分隔" data-i18n-placeholder="failure.tag_input_placeholder">
+                        <button class="btn btn-secondary btn-sm" id="btn-failure-tag" data-i18n="failure.batch_tag">批量打标签</button>
+                        <button class="btn btn-secondary btn-sm" id="btn-failure-export" data-i18n="action.export">导出</button>
+                        <button class="btn btn-warning btn-sm" id="btn-failure-regenerate" data-i18n="failure.batch_regenerate">批量重生成</button>
+                        <button class="btn btn-secondary btn-sm" id="btn-failure-delete" data-i18n="action.delete">删除记录</button>
                     </div>
                 </div>
                 <div id="failure-modal-body"></div>
             </div>
             <div class="modal-footer">
-                <button class="btn btn-secondary" id="btn-close-failure-modal-2">关闭</button>
+                <button class="btn btn-secondary" id="btn-close-failure-modal-2" data-i18n="action.close">关闭</button>
             </div>
         </div>
     </div>
@@ -203,7 +208,7 @@
     <!-- 加载遮罩 -->
     <div id="loading-overlay" class="overlay hidden">
         <div class="spinner"></div>
-        <p class="loading-text">处理中...</p>
+        <p class="loading-text" data-i18n="scan.running">处理中...</p>
     </div>
 
     <!-- 通知 -->

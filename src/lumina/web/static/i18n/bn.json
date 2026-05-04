@@ -1,0 +1,91 @@
+{
+  "meta": { "title": "Lumina - জ্ঞান ব্যবস্থাপনা" },
+  "nav": {
+    "dashboard": "ড্যাশবোর্ড",
+    "search": "অনুসন্ধান",
+    "graph": "জ্ঞান গ্রাফ",
+    "notes": "নোট",
+    "config": "কনফিগ"
+  },
+  "locale": { "label": "ভাষা" },
+  "action": {
+    "scan": "স্ক্যান",
+    "batch_repair": "ব্যাচ মেরামত",
+    "refresh": "রিফ্রেশ",
+    "search": "অনুসন্ধান",
+    "close": "বন্ধ",
+    "regenerate": "পুনরায় তৈরি",
+    "export": "রপ্তানি",
+    "delete": "মুছুন"
+  },
+  "scan": {
+    "running": "প্রসেস চলছে...",
+    "waiting": "অপেক্ষায়...",
+    "counter": {
+      "elapsed": "সময় {value}",
+      "scanned": "স্ক্যান {count}",
+      "changed": "পরিবর্তিত {count}",
+      "in_progress": "চলমান {count}",
+      "processed": "সফল {count}",
+      "completed": "সম্পন্ন {count}",
+      "failed": "ব্যর্থ {count}",
+      "skipped": "এড়ানো {count}",
+      "total": "মোট {count}"
+    }
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "বর্তমান কনফিগারেশন",
+        "hint": "এখানে আপনি বর্তমান ব্যবহারকারী কনফিগারেশন দেখতে এবং সম্পাদনা করতে পারবেন।",
+        "snapshot": "সক্রিয় কনফিগ স্ন্যাপশট",
+        "raw_yaml": "ব্যবহারকারী কনফিগ YAML (সম্পাদনাযোগ্য)",
+        "empty_yaml": "# ব্যবহারকারী কনফিগ খালি"
+      },
+      "system": {
+        "title": "সিস্টেম কনফিগারেশন",
+        "schema_version": "Schema সংস্করণ",
+        "supported_agents": "সমর্থিত Agents",
+        "planner_default_para": "Planner ডিফল্ট PARA",
+        "runtime_status": "রানটাইম অবস্থা",
+        "current_session": "বর্তমান সেশন",
+        "current_output_dir": "বর্তমান আউটপুট ডিরেক্টরি",
+        "log_retention_days": "লগ ধরে রাখার দিন"
+      },
+      "agent": {
+        "title": "Agent কনফিগারেশন",
+        "max_iterations": "Harness সর্বোচ্চ iteration",
+        "quality_threshold": "Harness গুণমান থ্রেশহোল্ড",
+        "incremental": "ইনক্রিমেন্টাল প্রসেসিং",
+        "parallel": "প্যারালাল প্রসেসিং",
+        "max_workers": "worker সংখ্যা",
+        "enable_vector_store": "ভেক্টর স্টোর সক্রিয় করুন",
+        "llm_shared": "শেয়ার্ড LLM কনফিগ (JSON)",
+        "llm_planner": "Planner LLM override (JSON)",
+        "llm_executor": "Executor LLM override (JSON)",
+        "llm_validator": "Validator LLM override (JSON)"
+      },
+      "user": {
+        "title": "ব্যবহারকারী পছন্দসমূহ",
+        "default_recursive": "ইনপুট সোর্সের জন্য ডিফল্ট recursive",
+        "supported_extensions": "সমর্থিত এক্সটেনশন (JSON Array)",
+        "input_sources": "ইনপুট সোর্স তালিকা (JSON)",
+        "output_plugin": "আউটপুট প্লাগইন",
+        "output_dir": "আউটপুট ডিরেক্টরি",
+        "vault_path": "Vault পথ",
+        "output_structure": "আউটপুট স্ট্রাকচার (JSON)",
+        "naming_rules": "নামকরণ নিয়ম (JSON)",
+        "note_organization": "নোট সংগঠন নিয়ম (JSON)"
+      },
+      "actions": {
+        "save_yaml": "YAML কনফিগ সংরক্ষণ",
+        "save_all": "সব কনফিগ সংরক্ষণ"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours}ঘ {minutes}মি",
+    "minutes_seconds": "{minutes}মি {seconds}সে",
+    "seconds": "{seconds}সে"
+  }
+}

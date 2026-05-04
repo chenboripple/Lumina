@@ -1,0 +1,91 @@
+{
+  "meta": { "title": "Lumina - علمی انتظام" },
+  "nav": {
+    "dashboard": "ڈیش بورڈ",
+    "search": "تلاش",
+    "graph": "علمی گراف",
+    "notes": "نوٹس",
+    "config": "ترتیبات"
+  },
+  "locale": { "label": "زبان" },
+  "action": {
+    "scan": "اسکین",
+    "batch_repair": "بیچ مرمت",
+    "refresh": "ریفریش",
+    "search": "تلاش",
+    "close": "بند کریں",
+    "regenerate": "دوبارہ بنائیں",
+    "export": "ایکسپورٹ",
+    "delete": "حذف"
+  },
+  "scan": {
+    "running": "پروسیسنگ جاری ہے...",
+    "waiting": "انتظار میں...",
+    "counter": {
+      "elapsed": "گزرا وقت {value}",
+      "scanned": "اسکین {count}",
+      "changed": "تبدیل شدہ {count}",
+      "in_progress": "زیر عمل {count}",
+      "processed": "کامیاب {count}",
+      "completed": "مکمل {count}",
+      "failed": "ناکام {count}",
+      "skipped": "چھوڑا گیا {count}",
+      "total": "کل {count}"
+    }
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "موجودہ ترتیب",
+        "hint": "آپ یہاں موجودہ صارف ترتیب دیکھ اور ترمیم کر سکتے ہیں۔",
+        "snapshot": "فعال ترتیب کا اسنیپ شاٹ",
+        "raw_yaml": "صارف ترتیب YAML (قابل ترمیم)",
+        "empty_yaml": "# صارف ترتیب خالی ہے"
+      },
+      "system": {
+        "title": "سسٹم ترتیب",
+        "schema_version": "Schema ورژن",
+        "supported_agents": "معاون Agents",
+        "planner_default_para": "Planner کا ڈیفالٹ PARA",
+        "runtime_status": "رن ٹائم حالت",
+        "current_session": "موجودہ سیشن",
+        "current_output_dir": "موجودہ آؤٹ پٹ ڈائریکٹری",
+        "log_retention_days": "لاگ برقرار رکھنے کے دن"
+      },
+      "agent": {
+        "title": "Agent ترتیب",
+        "max_iterations": "Harness کی زیادہ سے زیادہ iterations",
+        "quality_threshold": "Harness معیار حد",
+        "incremental": "تدریجی پروسیسنگ",
+        "parallel": "متوازی پروسیسنگ",
+        "max_workers": "workers کی تعداد",
+        "enable_vector_store": "ویکٹر اسٹور فعال کریں",
+        "llm_shared": "مشترکہ LLM ترتیب (JSON)",
+        "llm_planner": "Planner LLM اوور رائیڈ (JSON)",
+        "llm_executor": "Executor LLM اوور رائیڈ (JSON)",
+        "llm_validator": "Validator LLM اوور رائیڈ (JSON)"
+      },
+      "user": {
+        "title": "صارف ترجیحات",
+        "default_recursive": "ان پٹ ذرائع کے لیے ڈیفالٹ recursive",
+        "supported_extensions": "معاون ایکسٹینشنز (JSON Array)",
+        "input_sources": "ان پٹ ذرائع کی فہرست (JSON)",
+        "output_plugin": "آؤٹ پٹ پلگ ان",
+        "output_dir": "آؤٹ پٹ ڈائریکٹری",
+        "vault_path": "Vault راستہ",
+        "output_structure": "آؤٹ پٹ ساخت (JSON)",
+        "naming_rules": "نام رکھنے کے قواعد (JSON)",
+        "note_organization": "نوٹ تنظیم قواعد (JSON)"
+      },
+      "actions": {
+        "save_yaml": "YAML ترتیب محفوظ کریں",
+        "save_all": "تمام ترتیب محفوظ کریں"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours}گھنٹہ {minutes}منٹ",
+    "minutes_seconds": "{minutes}منٹ {seconds}سیکنڈ",
+    "seconds": "{seconds}سیکنڈ"
+  }
+}

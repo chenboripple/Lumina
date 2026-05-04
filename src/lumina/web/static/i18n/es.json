@@ -1,0 +1,116 @@
+{
+  "meta": { "title": "Lumina - Gestión del Conocimiento" },
+  "nav": {
+    "dashboard": "Panel",
+    "search": "Buscar",
+    "graph": "Grafo de Conocimiento",
+    "notes": "Notas",
+    "config": "Configuración"
+  },
+  "locale": { "label": "Idioma" },
+  "view": {
+    "dashboard": { "title": "📊 Panel" },
+    "search": { "title": "🔍 Búsqueda semántica" },
+    "graph": { "title": "🕸️ Grafo de Conocimiento" },
+    "notes": { "title": "📝 Notas" },
+    "config": { "title": "⚙️ Configuración" }
+  },
+  "action": {
+    "scan": "Escanear",
+    "batch_repair": "Reparación por lotes",
+    "refresh": "Actualizar",
+    "search": "Buscar",
+    "close": "Cerrar",
+    "regenerate": "Regenerar",
+    "export": "Exportar",
+    "delete": "Eliminar"
+  },
+  "scan": {
+    "running": "En ejecución...",
+    "waiting": "En espera...",
+    "last_run_failed": "La última ejecución tuvo fallos",
+    "last_run_completed": "Última ejecución completada",
+    "not_started": "Sin iniciar",
+    "current_source": "Actual: {source}",
+    "counter": {
+      "elapsed": "Tiempo {value}",
+      "scanned": "Escaneados {count}",
+      "changed": "Con cambios {count}",
+      "in_progress": "En progreso {count}",
+      "processed": "Procesados {count}",
+      "completed": "Completados {count}",
+      "failed": "Fallidos {count}",
+      "skipped": "Omitidos {count}",
+      "total": "Total {count}"
+    }
+  },
+  "queue": {
+    "badge": {
+      "pending": "Pendiente",
+      "processing": "Procesando",
+      "completed": "Completado",
+      "failed": "Fallido"
+    },
+    "meta": { "total_completed": "Total {total}, Completado {completed}" }
+  },
+  "failure": {
+    "modal": { "title": "Detalles de fallo" },
+    "select_all": "Seleccionar todo",
+    "view_details": "Ver detalles de fallos ({count})"
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "Configuración actual",
+        "hint": "Puede ver y editar la configuración de usuario actual aquí.",
+        "snapshot": "Instantánea activa",
+        "raw_yaml": "YAML de usuario (editable)",
+        "empty_yaml": "# Configuración de usuario vacía"
+      },
+      "system": {
+        "title": "Configuración del sistema",
+        "schema_version": "Versión de schema",
+        "supported_agents": "Agents compatibles",
+        "planner_default_para": "PARA predeterminado del planner",
+        "runtime_status": "Estado de ejecución",
+        "current_session": "Sesión actual",
+        "current_output_dir": "Directorio de salida actual",
+        "log_retention_days": "Días de retención de logs"
+      },
+      "agent": {
+        "title": "Configuración de Agent",
+        "max_iterations": "Máx. iteraciones de Harness",
+        "quality_threshold": "Umbral de calidad de Harness",
+        "incremental": "Procesamiento incremental",
+        "parallel": "Procesamiento paralelo",
+        "max_workers": "Cantidad de workers",
+        "enable_vector_store": "Habilitar almacén vectorial",
+        "llm_shared": "Configuración LLM compartida (JSON)",
+        "llm_planner": "Override LLM de Planner (JSON)",
+        "llm_executor": "Override LLM de Executor (JSON)",
+        "llm_validator": "Override LLM de Validator (JSON)"
+      },
+      "user": {
+        "title": "Preferencias de usuario",
+        "default_recursive": "Recursivo por defecto para fuentes",
+        "supported_extensions": "Extensiones compatibles (JSON Array)",
+        "input_sources": "Lista de fuentes de entrada (JSON)",
+        "output_plugin": "Plugin de salida",
+        "output_dir": "Directorio de salida",
+        "vault_path": "Ruta de Vault",
+        "output_structure": "Estructura de salida (JSON)",
+        "naming_rules": "Reglas de nombre (JSON)",
+        "note_organization": "Reglas de organización de notas (JSON)"
+      },
+      "actions": {
+        "save_yaml": "Guardar configuración YAML",
+        "save_all": "Guardar toda la configuración"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours} h {minutes} min",
+    "minutes_seconds": "{minutes} min {seconds} s",
+    "seconds": "{seconds} s"
+  }
+}

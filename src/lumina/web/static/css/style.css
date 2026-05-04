@@ -77,6 +77,32 @@ body {
     gap: 0.35rem;
 }
 
+.nav-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+}
+
+.locale-label {
+    font-size: 0.82rem;
+    color: var(--md-on-surface-variant);
+}
+
+.locale-selector {
+    border: 1px solid var(--md-outline);
+    border-radius: 10px;
+    background: #fff;
+    color: var(--md-on-surface);
+    font-size: 0.84rem;
+    padding: 0.34rem 0.46rem;
+    min-width: 172px;
+}
+
+.locale-selector:focus {
+    outline: none;
+    border-color: var(--md-primary);
+}
+
 .nav-btn {
     border: none;
     border-radius: 999px;

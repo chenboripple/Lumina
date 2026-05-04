@@ -1,0 +1,107 @@
+{
+  "meta": { "title": "Lumina - Управление знаниями" },
+  "nav": {
+    "dashboard": "Панель",
+    "search": "Поиск",
+    "graph": "Граф знаний",
+    "notes": "Заметки",
+    "config": "Настройки"
+  },
+  "locale": { "label": "Язык" },
+  "view": {
+    "dashboard": { "title": "📊 Панель" },
+    "search": { "title": "🔍 Семантический поиск" },
+    "graph": { "title": "🕸️ Граф знаний" },
+    "notes": { "title": "📝 Заметки" },
+    "config": { "title": "⚙️ Настройки" }
+  },
+  "action": {
+    "scan": "Сканировать",
+    "batch_repair": "Пакетное исправление",
+    "refresh": "Обновить",
+    "search": "Поиск",
+    "close": "Закрыть",
+    "regenerate": "Перегенерировать",
+    "export": "Экспорт",
+    "delete": "Удалить"
+  },
+  "scan": {
+    "running": "Выполняется...",
+    "waiting": "Ожидание...",
+    "last_run_failed": "В последнем запуске были ошибки",
+    "last_run_completed": "Последний запуск завершен",
+    "not_started": "Не запущено",
+    "current_source": "Текущий: {source}",
+    "counter": {
+      "elapsed": "Прошло {value}",
+      "scanned": "Сканировано {count}",
+      "changed": "Изменено {count}",
+      "in_progress": "В работе {count}",
+      "processed": "Успешно {count}",
+      "completed": "Завершено {count}",
+      "failed": "Ошибок {count}",
+      "skipped": "Пропущено {count}",
+      "total": "Итого {count}"
+    }
+  },
+  "failure": {
+    "modal": { "title": "Детали ошибок" },
+    "select_all": "Выбрать все",
+    "view_details": "Показать ошибки ({count})"
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "Текущая конфигурация",
+        "hint": "Здесь можно просматривать и редактировать текущую пользовательскую конфигурацию.",
+        "snapshot": "Снимок активной конфигурации",
+        "raw_yaml": "YAML пользовательской конфигурации (редактируемый)",
+        "empty_yaml": "# Пользовательская конфигурация пуста"
+      },
+      "system": {
+        "title": "Системная конфигурация",
+        "schema_version": "Версия schema",
+        "supported_agents": "Поддерживаемые Agents",
+        "planner_default_para": "PARA по умолчанию для planner",
+        "runtime_status": "Состояние выполнения",
+        "current_session": "Текущая сессия",
+        "current_output_dir": "Текущий каталог вывода",
+        "log_retention_days": "Срок хранения логов (дни)"
+      },
+      "agent": {
+        "title": "Конфигурация Agent",
+        "max_iterations": "Макс. итераций Harness",
+        "quality_threshold": "Порог качества Harness",
+        "incremental": "Инкрементальная обработка",
+        "parallel": "Параллельная обработка",
+        "max_workers": "Количество workers",
+        "enable_vector_store": "Включить векторное хранилище",
+        "llm_shared": "Общая конфигурация LLM (JSON)",
+        "llm_planner": "Переопределение LLM Planner (JSON)",
+        "llm_executor": "Переопределение LLM Executor (JSON)",
+        "llm_validator": "Переопределение LLM Validator (JSON)"
+      },
+      "user": {
+        "title": "Пользовательские настройки",
+        "default_recursive": "Рекурсивно по умолчанию для источников",
+        "supported_extensions": "Поддерживаемые расширения (JSON Array)",
+        "input_sources": "Список входных источников (JSON)",
+        "output_plugin": "Плагин вывода",
+        "output_dir": "Каталог вывода",
+        "vault_path": "Путь к Vault",
+        "output_structure": "Структура вывода (JSON)",
+        "naming_rules": "Правила именования (JSON)",
+        "note_organization": "Правила организации заметок (JSON)"
+      },
+      "actions": {
+        "save_yaml": "Сохранить YAML-конфигурацию",
+        "save_all": "Сохранить всю конфигурацию"
+      }
+    }
+  },
+  "duration": {
+    "hours_minutes": "{hours} ч {minutes} мин",
+    "minutes_seconds": "{minutes} мин {seconds} с",
+    "seconds": "{seconds} с"
+  }
+}
