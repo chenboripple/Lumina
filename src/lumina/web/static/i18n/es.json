@@ -1,0 +1,245 @@
+{
+  "meta": {
+    "title": "Lumina - Gestión del Conocimiento"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "search": "Buscar",
+    "graph": "Grafo de Conocimiento",
+    "notes": "Notas",
+    "config": "Configuración"
+  },
+  "locale": {
+    "label": "Idioma"
+  },
+  "view": {
+    "dashboard": {
+      "title": "📊 Panel"
+    },
+    "search": {
+      "title": "🔍 Búsqueda semántica"
+    },
+    "graph": {
+      "title": "🕸️ Grafo de Conocimiento"
+    },
+    "notes": {
+      "title": "📝 Notas"
+    },
+    "config": {
+      "title": "⚙️ Configuración"
+    }
+  },
+  "action": {
+    "scan": "Escanear",
+    "batch_repair": "Reparación por lotes",
+    "refresh": "Actualizar",
+    "search": "Buscar",
+    "close": "Cerrar",
+    "regenerate": "Regenerar",
+    "export": "Exportar",
+    "delete": "Eliminar"
+  },
+  "scan": {
+    "running": "En ejecución...",
+    "waiting": "En espera...",
+    "last_run_failed": "La última ejecución tuvo fallos",
+    "last_run_completed": "Última ejecución completada",
+    "not_started": "Sin iniciar",
+    "current_source": "Actual: {source}",
+    "counter": {
+      "elapsed": "Tiempo {value}",
+      "scanned": "Escaneados {count}",
+      "changed": "Con cambios {count}",
+      "in_progress": "En progreso {count}",
+      "processed": "Procesados {count}",
+      "completed": "Completados {count}",
+      "failed": "Fallidos {count}",
+      "skipped": "Omitidos {count}",
+      "total": "Total {count}"
+    },
+    "ready_for_rescan": "Ready to scan again",
+    "last_updated_at": "Last updated {time}",
+    "idle_hint": "Start a scan to see live progress and latest results.",
+    "already_running": "Scan is already running, please wait...",
+    "starting": "Starting scan...",
+    "start_failed": "Failed to start scan: {message}",
+    "completed": "Scan completed",
+    "background_running": "Scan is still running in background, please refresh later",
+    "status": {
+      "processing": "Processing",
+      "stopped": "Stopped"
+    }
+  },
+  "queue": {
+    "badge": {
+      "pending": "Pendiente",
+      "processing": "Procesando",
+      "completed": "Completado",
+      "failed": "Fallido"
+    },
+    "meta": {
+      "total_completed": "Total {total}, Completado {completed}"
+    },
+    "counter": {
+      "processed": "processed {count}",
+      "failed": "failed {count}",
+      "skipped": "skipped {count}"
+    }
+  },
+  "failure": {
+    "modal": {
+      "title": "Detalles de fallo"
+    },
+    "select_all": "Seleccionar todo",
+    "view_details": "Ver detalles de fallos ({count})",
+    "tag_input_placeholder": "Enter tags separated by commas",
+    "batch_tag": "Batch Tag",
+    "batch_regenerate": "Batch Regenerate",
+    "empty": "No failure items right now.",
+    "item_title": "Failure {index}",
+    "copy_path": "Copy path",
+    "copy_error": "Copy error",
+    "path_copied": "Path copied",
+    "error_copied": "Error copied",
+    "copy_failed": "Copy failed: {message}",
+    "select_required": "Please select failure items first",
+    "batch_regenerate_done": "Batch regenerate done: {success} success, {failed} failed",
+    "batch_regenerate_failed": "Batch regenerate failed: {message}",
+    "export_done": "Failure records exported",
+    "deleted_count": "Deleted {count} failure records",
+    "delete_failed": "Delete failed: {message}",
+    "tag_required": "Please enter at least one tag",
+    "tagged_count": "Tagged {count} records",
+    "tag_failed": "Tagging failed: {message}",
+    "status": {
+      "open": "Open",
+      "resolved": "Resolved",
+      "retry_failed": "Retry failed"
+    },
+    "field": {
+      "source": "Source:",
+      "file": "File:",
+      "error": "Error:",
+      "tags": "Tags:"
+    }
+  },
+  "config": {
+    "page": {
+      "current_config": {
+        "title": "Configuración actual",
+        "hint": "Puede ver y editar la configuración de usuario actual aquí.",
+        "snapshot": "Instantánea activa",
+        "raw_yaml": "YAML de usuario (editable)",
+        "empty_yaml": "# Configuración de usuario vacía"
+      },
+      "system": {
+        "title": "Configuración del sistema",
+        "schema_version": "Versión de schema",
+        "supported_agents": "Agents compatibles",
+        "planner_default_para": "PARA predeterminado del planner",
+        "runtime_status": "Estado de ejecución",
+        "current_session": "Sesión actual",
+        "current_output_dir": "Directorio de salida actual",
+        "log_retention_days": "Días de retención de logs"
+      },
+      "agent": {
+        "title": "Configuración de Agent",
+        "max_iterations": "Máx. iteraciones de Harness",
+        "quality_threshold": "Umbral de calidad de Harness",
+        "incremental": "Procesamiento incremental",
+        "parallel": "Procesamiento paralelo",
+        "max_workers": "Cantidad de workers",
+        "enable_vector_store": "Habilitar almacén vectorial",
+        "llm_shared": "Configuración LLM compartida (JSON)",
+        "llm_planner": "Override LLM de Planner (JSON)",
+        "llm_executor": "Override LLM de Executor (JSON)",
+        "llm_validator": "Override LLM de Validator (JSON)"
+      },
+      "user": {
+        "title": "Preferencias de usuario",
+        "default_recursive": "Recursivo por defecto para fuentes",
+        "supported_extensions": "Extensiones compatibles (JSON Array)",
+        "input_sources": "Lista de fuentes de entrada (JSON)",
+        "output_plugin": "Plugin de salida",
+        "output_dir": "Directorio de salida",
+        "vault_path": "Ruta de Vault",
+        "output_structure": "Estructura de salida (JSON)",
+        "naming_rules": "Reglas de nombre (JSON)",
+        "note_organization": "Reglas de organización de notas (JSON)"
+      },
+      "actions": {
+        "save_yaml": "Guardar configuración YAML",
+        "save_all": "Guardar toda la configuración"
+      }
+    },
+    "loading": "Loading config...",
+    "saved": "Configuration saved and hot reloaded",
+    "save_failed": "Failed to save config, please check JSON format",
+    "raw_saved": "YAML config saved and reloaded",
+    "raw_save_failed": "Failed to save YAML config, please check format",
+    "load_failed": "Failed to load config"
+  },
+  "duration": {
+    "hours_minutes": "{hours} h {minutes} min",
+    "minutes_seconds": "{minutes} min {seconds} s",
+    "seconds": "{seconds} s"
+  },
+  "stats": {
+    "total_notes": "Total Notes",
+    "processed_files": "Processed Files",
+    "avg_score": "Average Quality",
+    "vector_docs": "Vector Documents"
+  },
+  "panel": {
+    "processing_status": "📌 Processing Status",
+    "processed_files": "🗂️ Processed Source Files",
+    "quick_actions": "⚡ Quick Actions"
+  },
+  "common": {
+    "loading": "Loading...",
+    "no_records": "No records",
+    "unknown_error": "Unknown error"
+  },
+  "search": {
+    "input_placeholder": "Enter search text...",
+    "start_hint": "Enter keywords to start searching",
+    "no_results": "No results found"
+  },
+  "graph": {
+    "min_similarity": "Min similarity:",
+    "empty": "No graph data available",
+    "load_failed": "Failed to load graph"
+  },
+  "notes": {
+    "regenerate_source_title": "🎯 Regenerate by Source File",
+    "source_input_placeholder": "Enter source file absolute path, e.g. /Users/xxx/Desktop/xxx.txt",
+    "regenerate_source_action": "Regenerate Note for This File",
+    "source_regenerate_hint": "Only files under current input.sources and supported extensions are allowed.",
+    "loading": "Loading notes...",
+    "empty": "No notes yet",
+    "load_failed": "Failed to load notes",
+    "modal_title": "Note Details",
+    "related_links": "Related Links",
+    "detail_load_failed": "Failed to load note details",
+    "regenerate_success": "Note regenerated successfully",
+    "regenerate_failed": "Regenerate failed",
+    "regenerate_failed_with_message": "Regenerate failed: {message}",
+    "source_path_required": "Please enter a source file path first",
+    "source_regenerate_success": "Source file note regenerated"
+  },
+  "processed": {
+    "files_count": "{count} files",
+    "empty": "No processed records yet"
+  },
+  "repair": {
+    "done": "Batch repair done: {repaired} success, {failed} failed",
+    "failed": "Batch repair failed"
+  },
+  "refresh": {
+    "running": "Refreshing data...",
+    "done": "Data refreshed"
+  },
+  "error": {
+    "request_failed": "Request failed: {message}"
+  }
+}

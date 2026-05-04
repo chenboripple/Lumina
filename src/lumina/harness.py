@@ -353,7 +353,13 @@ class Harness:
             **self.vector_store.get_stats()
         }
     
-    def run(self, input_path: str, recursive: bool = True, file_filter: Optional[str] = None) -> Dict[str, Any]:
+    def run(
+        self,
+        input_path: str,
+        recursive: bool = True,
+        file_filter: Optional[str] = None,
+        pre_scanned_files: Optional[List[FileInfo]] = None,
+    ) -> Dict[str, Any]:
         """
         执行完整 Harness 流程（Agent 增强版）
         
@@ -361,6 +367,7 @@ class Harness:
             input_path: 输入文件或目录
             recursive: 是否递归扫描
             file_filter: 文件过滤规则，支持 glob，多个模式可用逗号分隔
+            pre_scanned_files: 预先扫描并聚合好的文件列表（用于多 source 一次规划）
             
         Returns:
             详细执行结果报告
@@ -377,12 +384,16 @@ class Harness:
                 self.progress_tracker.start_file("scanning")
                 self.progress_tracker.next_phase()
             
-            files = self.planner.scan(
-                input_path,
-                recursive,
-                file_filter=file_filter,
-                supported_extensions=self.config.supported_extensions,
-            )
+            if pre_scanned_files is None:
+                files = self.planner.scan(
+                    input_path,
+                    recursive,
+                    file_filter=file_filter,
+                    supported_extensions=self.config.supported_extensions,
+                )
+            else:
+                files = list(pre_scanned_files)
+                self._log(f"📊 Using pre-scanned files: {len(files)}")
             self.state.total_files = len(files)
             self.state.scanned_files = len(files)
             self._log(f"📊 Found {len(files)} files total")

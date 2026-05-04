@@ -470,26 +470,56 @@ def process(path, config, recursive, output, threshold, incremental, parallel, v
     total_files = 0
     processed_files = 0
     failed_files = 0
-    score_sum = 0.0
-    score_count = 0
+    avg_score = 0.0
     last_harness = None
 
-    for idx, (target_path, target_recursive, target_filter) in enumerate(targets, start=1):
-        if len(targets) > 1:
-            click.echo(f"\n[{idx}/{len(targets)}] 处理: {target_path}")
+    aggregate_mode = (not path) and len(targets) > 1
 
+    if aggregate_mode:
         harness = Harness(harness_config)
-        report = harness.run(target_path, recursive=target_recursive, file_filter=target_filter)
         last_harness = harness
+        aggregated_files = []
 
+        click.echo(f"\n🔗 多 source 聚合模式：将 {len(targets)} 个输入源合并后统一规划")
+        for idx, (target_path, target_recursive, target_filter) in enumerate(targets, start=1):
+            click.echo(f"[{idx}/{len(targets)}] 扫描: {target_path}")
+            scanned = harness.planner.scan(
+                target_path,
+                target_recursive,
+                file_filter=target_filter,
+                supported_extensions=harness.config.supported_extensions,
+            )
+            aggregated_files.extend(scanned)
+
+        report = harness.run(
+            "multi_sources_aggregated",
+            recursive=False,
+            pre_scanned_files=aggregated_files,
+        )
         stats = report["statistics"]
-        total_files += stats["total_files"]
-        processed_files += stats["processed_files"]
-        failed_files += stats["failed_files"]
-        score_sum += stats["avg_score"] * max(stats["processed_files"], 1)
-        score_count += max(stats["processed_files"], 1)
+        total_files = stats["total_files"]
+        processed_files = stats["processed_files"]
+        failed_files = stats["failed_files"]
+        avg_score = stats["avg_score"]
+    else:
+        score_sum = 0.0
+        score_count = 0
+        for idx, (target_path, target_recursive, target_filter) in enumerate(targets, start=1):
+            if len(targets) > 1:
+                click.echo(f"\n[{idx}/{len(targets)}] 处理: {target_path}")
 
-    avg_score = score_sum / score_count if score_count else 0.0
+            harness = Harness(harness_config)
+            report = harness.run(target_path, recursive=target_recursive, file_filter=target_filter)
+            last_harness = harness
+
+            stats = report["statistics"]
+            total_files += stats["total_files"]
+            processed_files += stats["processed_files"]
+            failed_files += stats["failed_files"]
+            score_sum += stats["avg_score"] * max(stats["processed_files"], 1)
+            score_count += max(stats["processed_files"], 1)
+
+        avg_score = score_sum / score_count if score_count else 0.0
 
     click.echo(f"\n✅ 处理完成!")
     click.echo(f"总文件数: {total_files}")
@@ -583,11 +613,38 @@ def serve(config, host, port, watch, initial_sync, recursive, output, threshold,
 
     def run_initial_sync_in_background():
         click.echo("🚀 后台初始化同步开始...")
-        for target_path, target_recursive, target_filter in targets:
+        if len(targets) > 1:
+            aggregated_files = []
+            click.echo(f"🔗 多 source 聚合初始同步: {len(targets)} 个输入源")
+            for target_path, target_recursive, target_filter in targets:
+                try:
+                    scanned = harness.planner.scan(
+                        str(target_path),
+                        target_recursive,
+                        file_filter=target_filter,
+                        supported_extensions=harness.config.supported_extensions,
+                    )
+                    aggregated_files.extend(scanned)
+                except Exception as exc:
+                    click.echo(f"❌ 扫描失败: {target_path} -> {exc}")
+
+            web.report_runtime_activity("multiple_sources_aggregated", mode="initial_sync")
             try:
-                run_target(target_path, target_recursive, target_filter, mode="initial_sync")
+                harness.run(
+                    "multi_sources_aggregated",
+                    recursive=False,
+                    pre_scanned_files=aggregated_files,
+                )
             except Exception as exc:
-                click.echo(f"❌ 初始化同步失败: {target_path} -> {exc}")
+                click.echo(f"❌ 聚合初始化同步失败: {exc}")
+            finally:
+                web.clear_runtime_activity("multiple_sources_aggregated")
+        else:
+            for target_path, target_recursive, target_filter in targets:
+                try:
+                    run_target(target_path, target_recursive, target_filter, mode="initial_sync")
+                except Exception as exc:
+                    click.echo(f"❌ 初始化同步失败: {target_path} -> {exc}")
         click.echo("✅ 后台初始化同步完成")
 
     def _wait_for_web_ready(timeout_seconds: float = 15.0) -> bool:

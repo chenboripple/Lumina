@@ -10,7 +10,7 @@ import threading
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from functools import wraps
 
 # 尝试导入 Flask
@@ -415,67 +415,124 @@ class WebInterface:
                 self._scan_state["phase"] = "running"
                 self._scan_state["started_at"] = datetime.now().isoformat()
                 self._scan_state["last_event_at"] = self._scan_state["started_at"]
-                self._scan_state["message"] = "扫描中..."
+                self._scan_state["message"] = "扫描并聚合中..."
                 try:
+                    baseline = self.harness.get_state() if self.harness else {}
+                    source_error_index = len(getattr(self.harness.state, "errors", [])) if self.harness else 0
+
+                    # 1) 先聚合扫描全部 source
+                    aggregated_files = []
                     for idx, source in enumerate(self.lumina_config.input_sources):
                         target_path = source.resolve_path()
                         recursive = getattr(source, "recursive", True)
                         file_filter = getattr(source, "filter", None)
                         self._scan_state["current_source"] = str(target_path)
                         self._scan_state["current_source_index"] = idx
+
                         if idx < len(self._scan_state["queue"]):
                             self._scan_state["queue"][idx]["status"] = "processing"
 
-                        source_baseline = self.harness.get_state() if self.harness else {}
-                        self._scan_state["_source_baseline"] = {
-                            "processed_files": source_baseline.get("processed_files", 0),
-                            "failed_files": source_baseline.get("failed_files", 0),
-                            "skipped_files": source_baseline.get("skipped_files", 0),
-                        }
-                        source_error_index = len(getattr(self.harness.state, "errors", [])) if self.harness else 0
+                        scanned = self.harness.planner.scan(
+                            str(target_path),
+                            recursive,
+                            file_filter=file_filter,
+                            supported_extensions=self.harness.config.supported_extensions,
+                        )
+                        aggregated_files.extend(scanned)
 
+                        if idx < len(self._scan_state["queue"]):
+                            item = self._scan_state["queue"][idx]
+                            item["total_files"] = len(scanned)
+                            item["changed_files"] = len(scanned)
+                            item["progress_percent"] = 100.0 if scanned else 0.0
+                            item["status"] = "completed"
+
+                    # 2) 单次 run：跨 source 统一规划与执行
+                    self._scan_state["current_source"] = "multiple_sources_aggregated"
+                    self._scan_state["current_source_index"] = -1
+                    self._scan_state["message"] = "跨 source 聚合处理中..."
+
+                    if not incremental:
+                        orig = self.harness.config.incremental
+                        self.harness.config.incremental = False
+                    try:
+                        report = self.harness.run(
+                            "multi_sources_aggregated",
+                            recursive=False,
+                            pre_scanned_files=aggregated_files,
+                        )
+                    finally:
                         if not incremental:
-                            orig = self.harness.config.incremental
-                            self.harness.config.incremental = False
+                            self.harness.config.incremental = orig
+
+                    queue_items = self._scan_state["queue"]
+
+                    def _resolve_source_index(file_path: str) -> Optional[int]:
                         try:
-                            report = self.harness.run(str(target_path), recursive=recursive, file_filter=file_filter)
+                            resolved = Path(str(file_path)).expanduser().resolve()
+                        except Exception:
+                            return None
 
-                            stats = report.get("statistics", {}) if isinstance(report, dict) else {}
-                            after_state = self.harness.get_state() if self.harness else {}
-                            total_files = int(stats.get("total_files", 0) or after_state.get("total_files", 0) or 0)
-                            changed_files = int(after_state.get("changed_files", 0) or total_files)
-                            processed_files = max(0, int(after_state.get("processed_files", 0)) - int(source_baseline.get("processed_files", 0)))
-                            failed_files = max(0, int(after_state.get("failed_files", 0)) - int(source_baseline.get("failed_files", 0)))
-                            skipped_files = max(0, int(after_state.get("skipped_files", 0)) - int(source_baseline.get("skipped_files", 0)))
+                        matched_idx = None
+                        matched_len = -1
+                        for i, item in enumerate(queue_items):
+                            try:
+                                source_root = Path(str(item.get("source", ""))).expanduser().resolve()
+                            except Exception:
+                                continue
+                            if resolved == source_root or source_root in resolved.parents:
+                                root_len = len(str(source_root))
+                                if root_len > matched_len:
+                                    matched_idx = i
+                                    matched_len = root_len
+                        return matched_idx
 
-                            if idx < len(self._scan_state["queue"]):
-                                item = self._scan_state["queue"][idx]
-                                item["total_files"] = total_files
-                                item["changed_files"] = changed_files
-                                item["processed"] = processed_files
-                                item["failed"] = failed_files
-                                item["skipped"] = skipped_files
-                                item["completed"] = processed_files + failed_files + skipped_files
-                                item["progress_percent"] = (
-                                    (item["completed"] / total_files) * 100.0 if total_files > 0 else 100.0
-                                )
-                                item["status"] = "failed" if str(report.get("status", "")).lower() == "failed" else "completed"
+                    # 精确按 source 统计：processed 来自 report.results，failed 来自新增 errors。
+                    source_stats = [
+                        {"processed": 0, "failed": 0, "skipped": 0}
+                        for _ in queue_items
+                    ]
 
-                            current_errors = list(getattr(self.harness.state, "errors", [])) if self.harness else []
-                            for error in current_errors[source_error_index:]:
-                                self._append_failed_item(
-                                    source=str(target_path),
-                                    file=error.get("file", str(target_path)),
-                                    message=error.get("message") or error.get("error") or str(error),
-                                )
-                        finally:
-                            if not incremental:
-                                self.harness.config.incremental = orig
+                    result_items = report.get("results", []) if isinstance(report, dict) else []
+                    for item in result_items:
+                        source_file = item.get("source", "")
+                        idx = _resolve_source_index(source_file)
+                        if idx is None:
+                            continue
+                        if item.get("processed"):
+                            source_stats[idx]["processed"] += 1
+
+                    current_errors = list(getattr(self.harness.state, "errors", [])) if self.harness else []
+                    for error in current_errors[source_error_index:]:
+                        err_file = error.get("file", "")
+                        idx = _resolve_source_index(err_file)
+                        if idx is not None:
+                            source_stats[idx]["failed"] += 1
+                        self._append_failed_item(
+                            source=(queue_items[idx].get("source") if idx is not None else "multiple_sources_aggregated"),
+                            file=error.get("file", "multiple_sources_aggregated"),
+                            message=error.get("message") or error.get("error") or str(error),
+                        )
+
+                    for idx, item in enumerate(queue_items):
+                        changed = int(item.get("changed_files", item.get("total_files", 0)) or 0)
+                        processed = int(source_stats[idx]["processed"])
+                        failed = int(source_stats[idx]["failed"])
+                        skipped = max(0, changed - processed - failed)
+
+                        source_stats[idx]["skipped"] = skipped
+                        item["processed"] = processed
+                        item["failed"] = failed
+                        item["skipped"] = skipped
+                        item["completed"] = processed + failed + skipped
+                        item["progress_percent"] = (item["completed"] / changed) * 100.0 if changed > 0 else 100.0
+                        item["status"] = "failed" if failed > 0 else "completed"
+
                     self._scan_state["phase"] = "completed"
                     self._scan_state["last_status"] = "completed"
                     self._scan_state["last_completed_at"] = datetime.now().isoformat()
                     self._scan_state["last_event_at"] = self._scan_state["last_completed_at"]
-                    self._scan_state["message"] = "扫描完成"
+                    self._scan_state["message"] = "跨 source 聚合扫描完成"
                 except Exception as exc:
                     idx = self._scan_state.get("current_source_index", -1)
                     if isinstance(idx, int) and idx >= 0 and idx < len(self._scan_state["queue"]):
@@ -1222,7 +1279,19 @@ class WebInterface:
 
         if harness_running:
             if not self._scan_state.get("running"):
-                started_at = datetime.now().isoformat()
+                existing_started_at = self._scan_state.get("started_at")
+                started_at = None
+                if existing_started_at:
+                    started_at = str(existing_started_at)
+                else:
+                    try:
+                        live_elapsed = float(live.get("elapsed_time", 0) or 0)
+                    except Exception:
+                        live_elapsed = 0.0
+                    if live_elapsed > 0:
+                        started_at = (datetime.now() - timedelta(seconds=live_elapsed)).isoformat()
+                    else:
+                        started_at = datetime.now().isoformat()
                 self._scan_state.update({
                     "running": True,
                     "phase": "running",
@@ -1232,8 +1301,25 @@ class WebInterface:
                 })
             if (not previous_message) or previous_phase in {"completed", "failed", "idle"}:
                 self._scan_state["message"] = "后台处理中..."
-        elif self._scan_state.get("running") and self._scan_state.get("phase") == "running":
-            self._scan_state["running"] = False
+
+        # 兜底：若运行已停止但 queue 仍残留 processing，说明该轮扫描中断，
+        # 需要收敛状态，避免前端长期显示“处理中”且无进展。
+        if (
+            (not self._scan_state.get("running"))
+            and (not harness_running)
+            and str(self._scan_state.get("phase", "")).lower() != "running"
+            and queue
+        ):
+            stale_processing = [q for q in queue if q.get("status") == "processing"]
+            if stale_processing:
+                for item in stale_processing:
+                    item["status"] = "failed"
+                self._scan_state["phase"] = "failed"
+                self._scan_state["last_status"] = "failed"
+                self._scan_state["current_source"] = ""
+                self._scan_state["current_source_index"] = -1
+                self._scan_state["message"] = "扫描已中断，请重试"
+                self._scan_state["last_event_at"] = datetime.now().isoformat()
 
         # 非运行且没有队列时，保留最近一次计数，不再被归零。
         if not self._scan_state.get("running") and not queue:
@@ -1307,6 +1393,11 @@ class WebInterface:
                 elapsed_seconds = max(0.0, (datetime.now() - start_dt).total_seconds())
             except Exception:
                 elapsed_seconds = 0.0
+        if harness_running:
+            try:
+                elapsed_seconds = max(elapsed_seconds, float(live.get("elapsed_time", 0) or 0))
+            except Exception:
+                pass
 
         if elapsed_seconds > 0:
             progress_units_total = total_files if total_files > 0 else int(self._scan_state.get("sources_total", 0) or 0)
