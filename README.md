@@ -1,36 +1,168 @@
 # Lumina
 
-> 从本地文件中提炼知识，生成结构化 Markdown/Obsidian 笔记的常驻服务。
+> 🌟 用 AI 自动整理你的本地文件，轻松生成结构化知识笔记
 
-Lumina 会读取 `~/.lumina/lumina.yaml` 中配置的输入源、输出目录、LLM 参数和目录结构规则，然后通过 Planner -> Executor -> Validator -> Harness 这条链路，把原始文件整理成可检索、可链接、可在 Obsidian 中继续使用的笔记。
+---
 
-## 当前能力
+## ✨ 核心价值
 
-- 常驻服务模式：启动 Web 界面、目录监听、后台初始化同步
-- 一次性处理模式：按路径或按 `input.sources` 批量处理
-- 增量更新：只重跑内容发生变化的文件
-- 内容策略：低知识密度过滤、样本事实降级、敏感字段脱敏
-- 文档聚合：短文档按目录合并、项目目录总览、全局知识地图
-- 场景模板：会议纪要、学术论文、PRD、设计文档、测试报告、运维文档、邮件、聊天记录等
-- Obsidian 增强输出：frontmatter、callouts、层级标签、related/up/aliases
-- Web 仪表盘：扫描队列、实时进度、最近一次运行结果、失败项批量操作
-- 向量能力：语义搜索、关联笔记、知识图谱
-- **多 LLM Provider 支持**：OpenAI、Anthropic、DeepSeek、阿里云百炼、火山引擎、Kimi、智谱 GLM、Ollama、llama.cpp
+Lumina 帮你：
 
-## 安装
+- **📁 自动整理**：把散落的文档、笔记、邮件、会议记录转换成结构化的知识笔记
+- **🤖 AI 驱动**：支持本地模型 (Ollama/llama.cpp) 或云端 API (OpenAI/Anthropic/DeepSeek/国内大模型)
+- **🔗 双向链接**：自动识别文件关系，生成 Obsidian 风格的笔记
+- **🎯 场景感知**：自动识别会议纪要、学术论文、PRD、邮件、聊天记录等
+- **⚡ 增量更新**：只重新处理变化的文件
+- **🌐 Web 界面**：可视化查看进度、搜索、管理知识图谱
+
+---
+
+## 🚀 快速开始
+
+### 一键安装 (推荐)
+
+**macOS / Linux:**
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/chenboripple/Lumina/release-ripple/install.sh | bash
+```
+
+**Windows (PowerShell):**
+
+```powershell
+irm https://raw.githubusercontent.com/chenboripple/Lumina/release-ripple/install.ps1 | iex
+```
+
+安装脚本会自动：
+- ✅ 检查 Python 3.8+
+- ✅ 安装 Lumina
+- ✅ 可选安装 Ollama (本地模型，无需 API Key)
+- ✅ 运行 `lumina init` 交互式配置
+
+### 配置 & 运行
+
+```bash
+# 1. 交互式配置向导
+lumina init
+
+# 2. 后台启动常驻服务
+lumina start
+
+# 3. 打开 Web 界面 (浏览器会自动打开)
+# http://127.0.0.1:5088
+
+# 4. 立即处理目录
+lumina process ~/Documents
+```
+
+### 常用命令
+
+```bash
+# 后台服务
+lumina start    # 启动
+lumina status   # 查看状态
+lumina stop     # 停止
+
+# 一次性处理
+lumina process ~/Documents
+
+# 向量搜索
+lumina search "关键词"
+lumina related "某篇笔记"
+
+# 查看帮助
+lumina --help
+```
+
+---
+
+## 🌟 主要功能
+
+### 📄 文件处理
+
+- **批量扫描**：自动识别知识文件
+- **📊 智能筛选**：过滤低价值文件、去重、敏感信息脱敏
+- **📝 自动摘要**：自动生成标题、摘要、标签
+- **🔄 增量更新**：只重跑内容变化的文件
+- **📂 文档聚合**：短文档按目录合并，项目目录生成总览
+- **🌍 全局知识地图**：生成全局知识图谱
+
+### 🎬 场景模板
+
+Lumina 会自动识别并适配：
+
+- 📋 **会议纪要**：自动提取议题、决策、行动项
+- 📄 **学术论文**：整理摘要、方法、结果、结论
+- 📐 **PRD/设计文档**：结构化产品需求、设计方案
+- 🧪 **测试报告**：提取测试结果、问题清单
+- 🖥️ **运维文档**：整理系统信息、故障处理
+- 📧 **邮件/聊天记录**：提取关键信息、行动项
+
+### 🎨 Obsidian 增强输出
+
+生成的笔记包含：
+- `frontmatter`: `title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
+- 场景感知的 `callout`
+- 层级标签：`lumina/scene/meeting_notes`
+- `[[双向链接]]` 自动识别相关文件
+
+### 🤖 多 LLM Provider 支持
+
+| Provider | 特点 |
+|---------|------|
+| **Ollama** | 本地模型，完全免费，无需 API Key |
+| **llama.cpp** | 本地轻量模型 |
+| **OpenAI** | GPT-4/GPT-3.5 |
+| **Anthropic** | Claude 系列 |
+| **DeepSeek** | 深度求索 |
+| **百炼/Qwen** | 阿里云通义千问 |
+| **火山引擎** | 火山方舟 |
+| **Kimi** | 月之暗面 |
+| **智谱 GLM** | 智谱 AI |
+
+### 🔍 向量能力
+
+- 语义搜索：自然语言找笔记
+- 关联笔记：找相关的知识
+- 知识图谱：可视化知识关联
+- 向量统计：查看知识覆盖
+
+### 🎛️ Web 仪表盘
+
+- 扫描队列、实时进度、速度、ETA
+- 最近一次运行结果
+- 失败项批量操作（重试/打标签/删除）
+- 语义搜索、知识图谱可视化
+- 向量统计
+
+---
+
+## 📖 详细文档
+
+- [安装指南](docs/deployment/installation.md)
+- [配置参考](docs/deployment/config-reference.md)
+- [用户手册](docs/user-guide/manual.md)
+- [功能说明](docs/product/features.md)
+- [架构设计](docs/design/architecture/planner.md)
+- [设计思路](docs/design/architecture/harness.md)
+
+---
+
+## 🛠️ 手动安装
+
+```bash
+# 方式 1: git clone
 git clone https://github.com/chenboripple/Lumina.git
 cd Lumina
 python install.py
-```
 
-更多安装说明见 [docs/deployment/installation.md](docs/deployment/installation.md)。
+# 方式 2: pip install
+pip install "git+https://github.com/chenboripple/Lumina.git@release-ripple"
+```
 
 ## 配置
 
-所有运行配置都来自 `~/.lumina/lumina.yaml`，包括：
-
+所有运行配置来自 `~/.lumina/lumina.yaml`，包括：
 - `input.sources`：输入目录、递归策略、glob 过滤规则
 - `supported_extensions`：允许处理的扩展名
 - `output.base_dir` / `output.plugin`：输出目录和格式
@@ -38,108 +170,22 @@ python install.py
 - `harness.max_iterations` / `harness.quality_threshold`
 - `llm` 以及 `llm_planner` / `llm_executor` / `llm_validator`
 
-完整示例见 [docs/deployment/config-reference.md](docs/deployment/config-reference.md)。
-
-## 使用
-
-### 常驻服务
-
-```bash
-lumina start
-lumina status
-lumina stop
-```
-
-默认地址是 `http://127.0.0.1:5088`。
-
-`lumina start` 会在后台启动 `lumina serve`，并维护：
-
-- `~/.lumina/service.pid`
-- `~/.lumina/service.json`
-- `~/.lumina/service-YYYY-MM-DD.log`
-
-### 前台服务
-
-```bash
-lumina serve
-lumina serve --host 127.0.0.1 --port 5088 --no-watch --no-initial-sync
-```
-
-`serve` 会：
-
-1. 启动 Web 界面
-2. 可选地监听 `input.sources`
-3. 在页面可访问后触发一次后台初始化同步
-
-### 一次性处理
-
-```bash
-lumina process
-lumina process ~/Documents
-lumina process ~/Documents --no-incremental --no-vector
-```
-
-- 不传路径时，按 `input.sources` 逐个处理
-- 传路径时，只处理指定文件或目录
-- `--incremental/--no-incremental` 控制是否跳过未变化文件
-
-### 向量相关命令
-
-```bash
-lumina search "差旅报销"
-lumina related "Projects/差旅系统设计说明.md"
-lumina graph --min-similarity 0.75 --output graph.json
-lumina stats
-```
-
-## Web 界面
-
-仪表盘覆盖这些能力：
-
-- `/api/scan`：触发按配置输入源的后台扫描
-- `/api/scan/status`：返回队列、文件级进度、速度、ETA、最近一次运行状态
-- `/api/notes/<id>/regenerate`：按笔记来源重生成
-- `/api/regenerate-source`：按源文件路径重生成
-- `/api/scan/failures/regenerate`：批量重试失败项
-- `/api/scan/failures/tag`：给失败项打标签
-- `/api/scan/failures/delete`：删除失败记录
-- `/api/search`、`/api/graph`、`/api/vector-stats`：搜索与图谱能力
-
-说明：`/api/status` 返回的是 Harness 运行状态；仪表盘顶部扫描卡片使用的是 `/api/scan/status`。
-
-## 输出行为
+## 技术说明
 
 ### Planner
-
 - 同时执行 `supported_extensions` 和 `input.sources[].filter` 两层过滤
 - 为文件分配 `note_subdir`
 - 短文档会按目录聚合
-- 项目型目录会生成“项目总览”簇
-- 文件数量足够多时会插入“全局知识地图”任务
+- 项目型目录会生成「项目总览」簇
+- 文件数量足够多时会插入「全局知识地图」任务
 
 ### Executor
-
 - 先做内容过滤，再做场景识别和 LLM 生成
 - 对低价值文件直接跳过，不进入验证与保存
 - 对生成结果执行标题归一化，避免落回原始文件名或占位标题
 
-### Obsidian 插件
-
-默认输出包含：
-
-- frontmatter：`title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
-- 场景感知 callout
-- 层级标签，例如 `lumina/scene/meeting_notes`
-- `[[双向链接]]`
-
-## 文档索引
-
-- [docs/index.md](docs/index.md)
-- [docs/user-guide/manual.md](docs/user-guide/manual.md)
-- [docs/product/features.md](docs/product/features.md)
-- [docs/design/architecture/planner.md](docs/design/architecture/planner.md)
-- [docs/design/architecture/harness.md](docs/design/architecture/harness.md)
-- [docs/deployment/installation.md](docs/deployment/installation.md)
+### Harness
+Planner → Executor → Validator → Harness 完整链路
 
 ## 开发与验证
 
@@ -148,5 +194,3 @@ lumina stats
 /usr/bin/python3 -m py_compile src/lumina/web_interface.py
 node --check src/lumina/web/static/js/app.js
 ```
-
-说明：这个仓库里根目录的 `lumina.py` 可能会影响临时导入测试；手动跑模块时优先确保 `src` 在 `PYTHONPATH` 前面。

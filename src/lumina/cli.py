@@ -15,15 +15,28 @@ import threading
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any, List
 import click
 from pprint import pprint
 
 from lumina.harness import Harness, HarnessConfig
-from lumina.config_core import LuminaConfig
+from lumina.config_core import LuminaConfig, InputSource, OutputConfig, USER_CONFIG_FILE
 from lumina.core.directory_monitor import DirectoryMonitor
 from lumina.debug import run_debug_mode
 from lumina.web_interface import WebInterface
+from lumina.llm import LLMProviderFactory
+
+# 可选导入 rich
+try:
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.prompt import Prompt, Confirm, IntPrompt
+    from rich.table import Table
+    from rich.text import Text
+    from rich.style import Style
+    RICH_AVAILABLE = True
+except ImportError:
+    RICH_AVAILABLE = False
 
 
 SERVICE_DIR = Path.home() / ".lumina"
@@ -832,24 +845,465 @@ def graph(config, output, min_similarity):
 def stats(config):
     """显示向量数据库统计信息"""
     _ensure_runtime_dependencies(enable_vector=True)
-    
+
     # 加载配置
     lumina_config = LuminaConfig.load(config)
-    
+
     # 初始化 Harness
     harness_config = HarnessConfig(
         enable_vector_store=True,
         vector_store_persist_dir=lumina_config.output.base_dir + "/.lumina/vector_store",
     )
-    
+
     harness = Harness(harness_config)
-    
+
     if not harness.vector_store:
         click.echo("❌ 向量数据库不可用")
         return
-    
+
     stats = harness.get_vector_stats()
-    
+
     click.echo("\n📊 向量数据库统计:")
     for key, value in stats.items():
         click.echo(f"   {key}: {value}")
+
+
+# ============================================================
+# Init 命令：交互式配置向导
+# ============================================================
+
+# 各 provider 对应的环境变量
+_PROVIDER_ENV_KEYS = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "bailian": "DASHSCOPE_API_KEY",
+    "volcengine": "VOLCENGINE_API_KEY",
+    "kimi": "MOONSHOT_API_KEY",
+    "glm": "ZHIPU_API_KEY",
+}
+
+# 各 provider 的友好名称
+_PROVIDER_LABELS = {
+    "ollama": "Ollama (本地，无需 API Key)",
+    "llamacpp": "llama.cpp (本地)",
+    "openai": "OpenAI (GPT-4)",
+    "anthropic": "Anthropic (Claude)",
+    "deepseek": "DeepSeek (深度求索)",
+    "bailian": "百炼 / Qwen (阿里云)",
+    "volcengine": "火山引擎 (火山方舟)",
+    "kimi": "Kimi (月之暗面)",
+    "glm": "智谱 GLM",
+}
+
+
+def _detect_ollama_models() -> Optional[List[str]]:
+    """检测 Ollama 是否运行，并返回可用模型列表"""
+    try:
+        import requests
+        response = requests.get("http://localhost:11434/api/tags", timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            models = [m.get("name", "") for m in data.get("models", [])]
+            return [m for m in models if m]
+    except Exception:
+        return None
+    return None
+
+
+def _detect_env_keys() -> Dict[str, str]:
+    """检测可用的 API Key 环境变量"""
+    detected = {}
+    for provider, env_key in _PROVIDER_ENV_KEYS.items():
+        value = os.environ.get(env_key)
+        if value:
+            detected[provider] = env_key
+    return detected
+
+
+def _detect_common_dirs() -> List[Path]:
+    """检测常用目录"""
+    candidates = [
+        Path.home() / "Documents",
+        Path.home() / "Desktop",
+        Path.home() / "Downloads",
+        Path.home() / "Notes",
+    ]
+    return [p for p in candidates if p.exists() and p.is_dir()]
+
+
+def _print_panel(console, title: str, content: str, style: str = "cyan"):
+    """打印面板"""
+    if RICH_AVAILABLE:
+        console.print(Panel.fit(content, title=title, border_style=style))
+    else:
+        click.echo(f"\n=== {title} ===")
+        click.echo(content)
+
+
+def _select_directory(console, prompt_text: str, candidates: List[Path], default: Optional[str] = None) -> str:
+    """让用户选择目录"""
+    if RICH_AVAILABLE:
+        table = Table(show_header=False, box=None, padding=(0, 1))
+        table.add_column("idx", style="cyan", justify="right")
+        table.add_column("path")
+        for i, path in enumerate(candidates, start=1):
+            table.add_row(f"[{i}]", str(path))
+        table.add_row(f"[{len(candidates) + 1}]", "自定义路径")
+        console.print(table)
+
+        choice = IntPrompt.ask(
+            prompt_text,
+            default=1,
+            choices=[str(i) for i in range(1, len(candidates) + 2)],
+            show_choices=False,
+        )
+
+        if choice <= len(candidates):
+            return str(candidates[choice - 1])
+        else:
+            custom = Prompt.ask("请输入路径", default=default or str(Path.home()))
+            return str(Path(custom).expanduser())
+    else:
+        for i, path in enumerate(candidates, start=1):
+            click.echo(f"  [{i}] {path}")
+        click.echo(f"  [{len(candidates) + 1}] 自定义路径")
+        choice = click.prompt(prompt_text, default=1, type=int)
+        if choice <= len(candidates):
+            return str(candidates[choice - 1])
+        else:
+            custom = click.prompt("请输入路径", default=default or str(Path.home()))
+            return str(Path(custom).expanduser())
+
+
+def _select_provider(console, ollama_models: Optional[List[str]], env_keys: Dict[str, str]) -> str:
+    """让用户选择 provider"""
+    # 排序：Ollama (如果可用) > 有 env key 的 > 其他
+    ordered = []
+
+    # 1. Ollama 优先（如果有模型）
+    if ollama_models:
+        ordered.append(("ollama", f"{_PROVIDER_LABELS['ollama']} ⭐推荐 (检测到 {len(ollama_models)} 个模型)"))
+
+    # 2. 有 env key 的 provider
+    for provider, env_key in env_keys.items():
+        ordered.append((provider, f"{_PROVIDER_LABELS.get(provider, provider)} (检测到 {env_key})"))
+
+    # 3. 其他 provider
+    other_providers = ["openai", "anthropic", "deepseek", "bailian", "volcengine", "kimi", "glm", "ollama", "llamacpp"]
+    seen = {p[0] for p in ordered}
+    for p in other_providers:
+        if p not in seen:
+            ordered.append((p, _PROVIDER_LABELS.get(p, p)))
+
+    if RICH_AVAILABLE:
+        table = Table(show_header=False, box=None, padding=(0, 1))
+        table.add_column("idx", style="cyan", justify="right")
+        table.add_column("provider")
+        for i, (provider, label) in enumerate(ordered, start=1):
+            table.add_row(f"[{i}]", label)
+        console.print(table)
+
+        choice = IntPrompt.ask(
+            "请选择 Provider",
+            default=1,
+            choices=[str(i) for i in range(1, len(ordered) + 1)],
+            show_choices=False,
+        )
+        return ordered[choice - 1][0]
+    else:
+        for i, (provider, label) in enumerate(ordered, start=1):
+            click.echo(f"  [{i}] {label}")
+        choice = click.prompt("请选择 Provider", default=1, type=int)
+        return ordered[choice - 1][0]
+
+
+def _select_model(console, provider: str, ollama_models: Optional[List[str]]) -> str:
+    """让用户选择模型"""
+    default_model = LLMProviderFactory.get_default_model(provider)
+
+    # Ollama: 列出已有模型
+    if provider == "ollama" and ollama_models:
+        if RICH_AVAILABLE:
+            table = Table(show_header=False, box=None, padding=(0, 1))
+            table.add_column("idx", style="cyan", justify="right")
+            table.add_column("model")
+            for i, model in enumerate(ollama_models, start=1):
+                marker = " ⭐推荐" if model.startswith(default_model) else ""
+                table.add_row(f"[{i}]", f"{model}{marker}")
+            table.add_row(f"[{len(ollama_models) + 1}]", "手动输入模型名")
+            console.print(table)
+
+            choice = IntPrompt.ask(
+                "请选择模型",
+                default=1,
+                choices=[str(i) for i in range(1, len(ollama_models) + 2)],
+                show_choices=False,
+            )
+            if choice <= len(ollama_models):
+                return ollama_models[choice - 1]
+            else:
+                return Prompt.ask("请输入模型名", default=default_model)
+        else:
+            for i, model in enumerate(ollama_models, start=1):
+                click.echo(f"  [{i}] {model}")
+            click.echo(f"  [{len(ollama_models) + 1}] 手动输入")
+            choice = click.prompt("请选择模型", default=1, type=int)
+            if choice <= len(ollama_models):
+                return ollama_models[choice - 1]
+            else:
+                return click.prompt("请输入模型名", default=default_model)
+
+    # 其他 provider: 使用默认或手动输入
+    if RICH_AVAILABLE:
+        return Prompt.ask(
+            f"请输入模型名 (默认: {default_model})",
+            default=default_model,
+        )
+    else:
+        return click.prompt("请输入模型名", default=default_model)
+
+
+def _ask_api_key(console, provider: str, env_keys: Dict[str, str]) -> str:
+    """询问 API Key"""
+    if provider in ("ollama", "llamacpp"):
+        return ""
+
+    env_key_name = _PROVIDER_ENV_KEYS.get(provider)
+
+    # 检测到环境变量
+    if provider in env_keys:
+        if RICH_AVAILABLE:
+            use_env = Confirm.ask(
+                f"检测到环境变量 {env_key_name}，是否使用？",
+                default=True,
+            )
+        else:
+            use_env = click.confirm(
+                f"检测到环境变量 {env_key_name}，是否使用？",
+                default=True,
+            )
+        if use_env:
+            # 留空，让运行时从 env 读取
+            return ""
+
+    # 手动输入
+    if RICH_AVAILABLE:
+        api_key = Prompt.ask(f"请输入 {provider} 的 API Key (留空则从 {env_key_name} 读取)", default="", password=True)
+    else:
+        api_key = click.prompt(
+            f"请输入 {provider} 的 API Key (留空则从 {env_key_name} 读取)",
+            default="",
+            hide_input=True,
+            show_default=False,
+        )
+    return api_key
+
+
+def _build_config_yaml(
+    input_dir: str,
+    output_dir: str,
+    provider: str,
+    model: str,
+    api_key: str,
+) -> Dict[str, Any]:
+    """根据用户选择构建配置字典"""
+    config = {
+        "input": {
+            "sources": [
+                {
+                    "path": input_dir,
+                    "recursive": True,
+                }
+            ],
+            "default_recursive": True,
+        },
+        "output": {
+            "plugin": "obsidian",
+            "base_dir": output_dir,
+        },
+        "llm": {
+            "provider": provider,
+            "model": model,
+        },
+        "harness": {
+            "max_iterations": 3,
+            "quality_threshold": 0.8,
+        },
+    }
+
+    # 仅在用户提供 api_key 时写入
+    if api_key:
+        config["llm"]["api_key"] = api_key
+
+    return config
+
+
+@cli.command()
+@click.option('--force', '-f', is_flag=True, default=False, help='覆盖已有配置文件')
+def init(force):
+    """交互式配置向导：生成 ~/.lumina/lumina.yaml"""
+    import yaml
+
+    console = Console() if RICH_AVAILABLE else None
+
+    # 标题
+    if RICH_AVAILABLE:
+        console.print()
+        console.print(Panel.fit(
+            "[bold cyan]🌟 Lumina 初始化向导[/bold cyan]\n"
+            "这个向导将帮助你创建一个最小可用的配置文件",
+            border_style="cyan",
+        ))
+    else:
+        click.echo("\n🌟 Lumina 初始化向导")
+        click.echo("─" * 40)
+
+    # 检查已有配置
+    if USER_CONFIG_FILE.exists() and USER_CONFIG_FILE.read_text().strip() and not force:
+        if RICH_AVAILABLE:
+            overwrite = Confirm.ask(
+                f"\n[yellow]配置文件已存在: {USER_CONFIG_FILE}[/yellow]\n是否覆盖？",
+                default=False,
+            )
+        else:
+            overwrite = click.confirm(
+                f"\n配置文件已存在: {USER_CONFIG_FILE}\n是否覆盖？",
+                default=False,
+            )
+        if not overwrite:
+            click.echo("已取消，未修改原配置")
+            return
+
+    # 1. 选择输入源目录
+    if RICH_AVAILABLE:
+        console.print("\n[bold]📁 1. 选择输入源目录[/bold]")
+    else:
+        click.echo("\n📁 1. 选择输入源目录")
+
+    common_dirs = _detect_common_dirs()
+    if not common_dirs:
+        common_dirs = [Path.home() / "Documents"]
+
+    input_dir = _select_directory(
+        console,
+        "请选择输入目录",
+        common_dirs,
+        default=str(Path.home() / "Documents"),
+    )
+
+    # 2. 选择输出目录
+    if RICH_AVAILABLE:
+        console.print("\n[bold]📁 2. 选择输出目录 (Obsidian Vault)[/bold]")
+    else:
+        click.echo("\n📁 2. 选择输出目录 (Obsidian Vault)")
+
+    output_candidates = [
+        Path.home() / "Lumina" / "Notes",
+        Path.home() / "Obsidian" / "Lumina",
+    ]
+    output_dir = _select_directory(
+        console,
+        "请选择输出目录",
+        output_candidates,
+        default=str(Path.home() / "Lumina" / "Notes"),
+    )
+
+    # 3. 检测并选择 Provider
+    if RICH_AVAILABLE:
+        console.print("\n[bold]🤖 3. 选择 LLM Provider[/bold]")
+        console.print("[dim]检测中...[/dim]")
+    else:
+        click.echo("\n🤖 3. 选择 LLM Provider")
+        click.echo("检测中...")
+
+    ollama_models = _detect_ollama_models()
+    env_keys = _detect_env_keys()
+
+    if RICH_AVAILABLE:
+        if ollama_models:
+            console.print(f"[green]✓[/green] 检测到 Ollama (本地)，{len(ollama_models)} 个可用模型")
+        if env_keys:
+            for provider, env_key in env_keys.items():
+                console.print(f"[green]✓[/green] 检测到环境变量 {env_key}")
+        if not ollama_models and not env_keys:
+            console.print("[yellow]ℹ[/yellow] 未检测到本地 Ollama 或 API Key 环境变量")
+    else:
+        if ollama_models:
+            click.echo(f"✓ 检测到 Ollama，{len(ollama_models)} 个可用模型")
+        if env_keys:
+            for provider, env_key in env_keys.items():
+                click.echo(f"✓ 检测到环境变量 {env_key}")
+
+    provider = _select_provider(console, ollama_models, env_keys)
+
+    # 4. 选择模型
+    if RICH_AVAILABLE:
+        console.print(f"\n[bold]🤖 4. 选择模型[/bold] (provider: [cyan]{provider}[/cyan])")
+    else:
+        click.echo(f"\n🤖 4. 选择模型 (provider: {provider})")
+
+    model = _select_model(console, provider, ollama_models)
+
+    # 5. 询问 API Key (Ollama/llamacpp 跳过)
+    api_key = _ask_api_key(console, provider, env_keys)
+
+    # 6. 确认并保存
+    if RICH_AVAILABLE:
+        console.print("\n[bold]💾 5. 生成配置[/bold]")
+        summary = Table(show_header=False, box=None, padding=(0, 1))
+        summary.add_column(style="cyan")
+        summary.add_column()
+        summary.add_row("输入目录", input_dir)
+        summary.add_row("输出目录", output_dir)
+        summary.add_row("Provider", provider)
+        summary.add_row("Model", model)
+        if api_key:
+            summary.add_row("API Key", "*" * 8 + " (已设置)")
+        elif provider not in ("ollama", "llamacpp"):
+            summary.add_row("API Key", f"(将从环境变量 {_PROVIDER_ENV_KEYS.get(provider, '')} 读取)")
+        console.print(summary)
+        console.print(f"\n配置文件将保存到: [cyan]{USER_CONFIG_FILE}[/cyan]")
+        confirm = Confirm.ask("确认生成？", default=True)
+    else:
+        click.echo("\n💾 5. 生成配置")
+        click.echo(f"  输入目录: {input_dir}")
+        click.echo(f"  输出目录: {output_dir}")
+        click.echo(f"  Provider: {provider}")
+        click.echo(f"  Model: {model}")
+        click.echo(f"\n配置文件将保存到: {USER_CONFIG_FILE}")
+        confirm = click.confirm("确认生成？", default=True)
+
+    if not confirm:
+        click.echo("已取消")
+        return
+
+    config_dict = _build_config_yaml(input_dir, output_dir, provider, model, api_key)
+
+    # 写入配置文件
+    USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(USER_CONFIG_FILE, "w", encoding="utf-8") as f:
+        yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True, sort_keys=False)
+
+    # 创建输出目录
+    Path(os.path.expanduser(output_dir)).mkdir(parents=True, exist_ok=True)
+
+    # 完成提示
+    if RICH_AVAILABLE:
+        console.print()
+        console.print(Panel.fit(
+            "[bold green]✅ 配置完成![/bold green]\n\n"
+            f"配置文件: [cyan]{USER_CONFIG_FILE}[/cyan]\n\n"
+            "下一步:\n"
+            "  [bold]lumina start[/bold]      启动后台服务\n"
+            f"  [bold]lumina process {input_dir}[/bold]  立即处理文件\n"
+            "  [bold]lumina serve[/bold]      前台启动 Web 界面",
+            border_style="green",
+        ))
+    else:
+        click.echo(f"\n✅ 配置完成！")
+        click.echo(f"配置文件: {USER_CONFIG_FILE}")
+        click.echo("\n下一步:")
+        click.echo("  lumina start              启动后台服务")
+        click.echo(f"  lumina process {input_dir}  立即处理文件")
+        click.echo("  lumina serve              前台启动 Web 界面")
