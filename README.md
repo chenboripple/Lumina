@@ -105,15 +105,26 @@ Lumina 会自动识别并适配：
 - 🖥️ **运维文档**：整理系统信息、故障处理
 - 📧 **邮件/聊天记录**：提取关键信息、行动项
 
-### 🎨 Obsidian 友好输出
+### 🎨 多格式输出
 
-Lumina 生成的是纯 Markdown 文件，专为 [Obsidian](https://obsidian.md) 优化，但也可以在任何 Markdown 编辑器中使用。
+Lumina 生成的是纯 Markdown 文件，支持多种笔记工具：
 
-笔记包含：
-- `frontmatter`: `title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
+**Obsidian（推荐）**
+- YAML Frontmatter: `title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
 - 场景感知的 `callout`
 - 层级标签：`lumina/scene/meeting_notes`
 - `[[双向链接]]` 自动识别相关文件
+
+**Notion**
+- Properties 表格（Notion 会自动识别）
+- 标准 Markdown 链接
+- 适合直接导入 Notion（选择 Import → Markdown）
+
+**Plain Markdown**
+- 通用 Markdown 格式
+- 可在任何 Markdown 编辑器中使用
+
+通过 `output.plugin` 配置选择输出格式。
 
 ### 🤖 多 LLM Provider 支持
 

@@ -359,26 +359,174 @@ class PlainMarkdownPlugin(BasePlugin):
 
 class NotionPlugin(BasePlugin):
     """
-    Notion 格式插件（计划中）
-    
-    目标：生成 Notion API 兼容的格式
+    Notion 格式插件
+
+    生成 Notion 导入友好的 Markdown：
+    - 使用 properties 表格替代 YAML Frontmatter
+    - 使用标准 Markdown 链接
+    - 适合直接导入 Notion
     """
-    
+
     name = "notion"
     display_name = "Notion"
-    
+
     def format(self, note: NoteData) -> str:
-        # TODO: 实现 Notion API 格式
-        raise NotImplementedError("Notion plugin is planned but not implemented yet")
-    
+        scene = str(note.metadata.get("scene", "generic_notes"))
+        related = self._clean_related(note.links)
+        para = self._infer_para(note.metadata)
+        hierarchical_tags = self._build_hierarchical_tags(note.tags, scene, para)
+        status = self._derive_status(note.metadata)
+        note_subdir = str(note.metadata.get("note_subdir", "") or "").strip("/")
+
+        lines = []
+
+        # 标题
+        lines.append(f"# {note.title}")
+        lines.append("")
+
+        # Notion 风格的 Properties 表格
+        prop_table = [
+            "| Property | Value |",
+            "|----------|-------|",
+        ]
+        prop_table.append(f"| Status | {status} |")
+        prop_table.append(f"| PARA | {para} |")
+        prop_table.append(f"| Scene | {scene} |")
+        if note_subdir:
+            prop_table.append(f"| Path | {note_subdir} |")
+        prop_table.append(f"| Source | {note.source} |")
+        prop_table.append(f"| Lumina Score | {note.metadata.get('score', 0) or 0} |")
+        lines.extend(prop_table)
+        lines.append("")
+
+        # 上下文区块
+        if scene or para or note_subdir:
+            lines.append("## Context")
+            lines.append("")
+            if note_subdir:
+                lines.append(f"- **Path**: {note_subdir}")
+            if scene:
+                lines.append(f"- **Scene**: {scene}")
+            if para:
+                lines.append(f"- **PARA**: {para}")
+            if scene and para:
+                lines.append(f"- **Type**: {scene} ({para})")
+            lines.append("")
+
+        # 内容
+        lines.append(note.content)
+        lines.append("")
+
+        # 摘要
+        if note.metadata.get("summary"):
+            lines.append("## Summary")
+            lines.append("")
+            lines.append(f"> {note.metadata.get('summary')}")
+            lines.append("")
+
+        # 标签
+        if hierarchical_tags:
+            lines.append("## Tags")
+            lines.append("")
+            lines.append(self.tag_syntax(hierarchical_tags))
+            lines.append("")
+
+        # 关联
+        if related:
+            lines.append("## Related")
+            lines.append("")
+            for link in related:
+                lines.append(f"- {self.link_syntax(link)}")
+            lines.append("")
+
+        return "\n".join(lines)
+
     def frontmatter(self, metadata: Dict[str, Any]) -> str:
+        # Notion 不使用 YAML frontmatter
         return ""
-    
+
     def link_syntax(self, target: str) -> str:
-        return f"[{target}]({target})"
-    
+        # Notion 使用标准 Markdown 链接
+        cleaned = target.strip("[]")
+        return f"[{cleaned}]({cleaned})"
+
     def tag_syntax(self, tags: List[str]) -> str:
-        return ", ".join(tags)
+        # Notion 标签在 Markdown 中用逗号分隔
+        return ", ".join(f"`{tag}`" for tag in tags if tag)
+
+    def _derive_status(self, metadata: Dict[str, Any]) -> str:
+        score = float(metadata.get("score", 0) or 0)
+        if score >= 0.85:
+            return "🟢 Stable"
+        if score >= 0.65:
+            return "🟡 Draft"
+        return "🔴 Review"
+
+    def _infer_para(self, metadata: Dict[str, Any]) -> str:
+        para = str(metadata.get("para", "")).strip()
+        if para:
+            return para
+
+        subdir = str(metadata.get("note_subdir", "")).strip("/")
+        if not subdir:
+            return "Resources"
+
+        parts = [p for p in subdir.split("/") if p]
+        for part in parts:
+            lowered = part.lower()
+            if lowered in {"projects", "areas", "resources", "archive", "archives"}:
+                if lowered == "archives":
+                    return "Archive"
+                return part
+
+        return parts[-1] if parts else "Resources"
+
+    def _clean_related(self, links: List[str]) -> List[str]:
+        cleaned = []
+        seen = set()
+        for link in links or []:
+            value = str(link).strip().strip("[]")
+            if not value:
+                continue
+            key = value.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            cleaned.append(value)
+        return cleaned[:20]
+
+    def _build_hierarchical_tags(self, tags: List[str], scene: str, para: str) -> List[str]:
+        normalized = []
+        seen = set()
+
+        base_tags = [f"lumina/scene/{scene}", f"lumina/para/{para}"]
+        for tag in base_tags + (tags or []):
+            value = self._to_hierarchical_tag(tag)
+            if value and value not in seen:
+                seen.add(value)
+                normalized.append(value)
+
+        return normalized
+
+    def _to_hierarchical_tag(self, tag: str) -> str:
+        raw = self._normalize_tag(tag)
+        if not raw:
+            return ""
+        if "/" in raw:
+            return raw
+
+        parts = [p for p in re.split(r"[_\-:\s]+", raw) if p]
+        if len(parts) >= 2:
+            return "/".join(parts[:3])
+
+        return raw
+
+    def _normalize_tag(self, tag: str) -> str:
+        value = str(tag or "").strip().strip("#")
+        value = re.sub(r"\s+", "_", value)
+        value = re.sub(r"[^\w\-/\u4e00-\u9fff]", "", value)
+        value = re.sub(r"/+", "/", value)
+        return value.strip("/_")
 
 
 # 插件注册表
