@@ -133,15 +133,17 @@
 
 这意味着当前产品逻辑已经不是“一文件一笔记”，而是“单文件 + 聚合簇 + 总览任务”的混合模式。
 
-## 6. Obsidian 输出增强
+## 6. 多格式输出
 
 核心文件：
 
 - [src/lumina/plugins.py](../../src/lumina/plugins.py)
 
-当前 Obsidian 输出增强包括：
+当前支持三种输出格式：
 
-- frontmatter：`status`、`para`、`aliases`、`up`、`related`
+### Obsidian（默认）
+
+- YAML frontmatter：`status`、`para`、`aliases`、`up`、`related`
 - Scene 感知 callout 类型
 - `[[双向链接]]`
 - 标签层级化
@@ -155,6 +157,19 @@
 - 运维文档 -> `danger`
 - 邮件 -> `tip`
 - 聊天记录 -> `note`
+
+### Notion
+
+- Properties 表格（Notion 导入时自动识别为页面属性）
+- 标准 Markdown 链接 `[text](url)`
+- 标签使用反引号包裹
+- 适合直接导入 Notion
+
+### Plain Markdown
+
+- 通用 Markdown 格式
+- 无特定工具依赖
+- 可在任何 Markdown 编辑器中使用
 
 ## 7. 向量搜索与知识图谱
 

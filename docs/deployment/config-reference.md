@@ -50,7 +50,7 @@ input:
 # 输出配置：整理后的笔记存放位置和格式
 # ──────────────────────────────────────────────
 output:
-  plugin: obsidian               # 输出插件：obsidian | plain
+  plugin: obsidian               # 输出插件：obsidian | notion | plain
   base_dir: "~/Lumina/Notes"    # 笔记根目录
   vault_path: "~/Obsidian/Vault" # Obsidian Vault 路径（使用 obsidian 插件时）
 
@@ -107,7 +107,7 @@ service:
 
 # ──────────────────────────────────────────────
 # LLM 配置
-# api_key 必填，不从环境变量读取
+# api_key 可写入配置，或留空让 Lumina 从环境变量自动读取
 # ──────────────────────────────────────────────
 llm:
   provider: openai               # openai | anthropic
@@ -271,7 +271,8 @@ llm:
 | 值 | 说明 |
 |---|---|
 | `obsidian` | 生成 Obsidian 兼容格式，含增强 frontmatter、callouts、层级标签和 `[[双向链接]]` |
-| `plain` | 纯 Markdown，无特定工具依赖 |
+| `notion` | 生成 Notion 导入友好的 Markdown，使用 Properties 表格替代 YAML frontmatter，标准 Markdown 链接 |
+| `plain` | 纯 Markdown，无特定工具依赖，可在任何 Markdown 编辑器中使用 |
 
 当 `output.plugin = obsidian` 时，当前版本默认会写出这些字段：
 
@@ -285,6 +286,13 @@ llm:
 - `source`
 
 同时会根据检测到的 scene 选择不同 callout 类型，并自动补齐层级标签，例如 `lumina/scene/meeting_notes`、`lumina/para/Projects`。
+
+当 `output.plugin = notion` 时，输出使用 Notion 友好的格式：
+
+- Properties 表格（Notion 导入时会自动识别为页面属性）
+- 标准 Markdown 链接 `[text](url)`
+- 标签使用反引号包裹，便于 Notion 识别
+- 适合直接导入 Notion（选择 Import → Markdown）
 
 ### `output.note_organization.scenes` 与文档 scene 模板的区别
 
