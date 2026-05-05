@@ -51,7 +51,7 @@ RUNTIME_DEPENDENCIES_BASE = [
 ]
 
 RUNTIME_DEPENDENCIES_VECTOR = [
-    ("chromadb<0.5", "chromadb"),
+    ("chromadb>=1.0.0,<2.0.0", "chromadb"),
     ("sentence-transformers", "sentence_transformers"),
 ]
 
@@ -63,33 +63,6 @@ def _module_available(module_name: str) -> bool:
         return False
 
 
-def _is_chromadb_compatible() -> bool:
-    """当前项目使用旧版 Chroma 客户端配置，需 chromadb<0.5。"""
-    try:
-        version = importlib.metadata.version("chromadb")
-        parts = version.split(".")
-        major = int(parts[0]) if len(parts) > 0 else 0
-        minor = int(parts[1]) if len(parts) > 1 else 0
-        # 0.5+ 与 1.x API 均不兼容当前初始化方式
-        if major >= 1:
-            return False
-        if major == 0 and minor >= 5:
-            return False
-        return True
-    except Exception:
-        return False
-
-
-def _is_numpy_compatible_for_chromadb() -> bool:
-    """chromadb 0.4.x 在本项目路径下需要 numpy<2。"""
-    try:
-        version = importlib.metadata.version("numpy")
-        major = int(version.split(".")[0])
-        return major < 2
-    except Exception:
-        return False
-
-
 def _ensure_runtime_dependencies(enable_vector: bool = False) -> None:
     """运行前检查关键依赖，缺失时自动安装。"""
     deps = list(RUNTIME_DEPENDENCIES_BASE)
@@ -97,14 +70,6 @@ def _ensure_runtime_dependencies(enable_vector: bool = False) -> None:
         deps.extend(RUNTIME_DEPENDENCIES_VECTOR)
 
     missing = [pkg for pkg, module in deps if not _module_available(module)]
-
-    # 版本兼容性检查：chromadb 必须 <0.5
-    if enable_vector and _module_available("chromadb") and not _is_chromadb_compatible():
-        missing.append("chromadb<0.5")
-
-    # 兼容性检查：chromadb 0.4.x 与 numpy 2.x 不兼容
-    if enable_vector and _module_available("chromadb") and not _is_numpy_compatible_for_chromadb():
-        missing.append("numpy<2")
 
     if not missing:
         return

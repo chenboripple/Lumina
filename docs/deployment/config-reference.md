@@ -8,11 +8,26 @@ Lumina 的所有配置通过用户主目录下的 `~/.lumina/lumina.yaml` 文件
 
 ## 最小配置（快速上手）
 
+方式一：配置文件中直接写入 API Key
+
 ```yaml
 llm:
   provider: openai
   api_key: "sk-..."
   model: gpt-4
+```
+
+方式二：使用环境变量（推荐，更安全）
+
+```bash
+export OPENAI_API_KEY="sk-..."
+```
+
+```yaml
+llm:
+  provider: openai
+  model: gpt-4
+  # api_key 留空，自动从 OPENAI_API_KEY 环境变量读取
 ```
 
 ---
