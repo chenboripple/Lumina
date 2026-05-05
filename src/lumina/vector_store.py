@@ -336,13 +336,14 @@ class VectorStore:
         
         # 解析结果
         search_results = []
+        result_embeddings = results.get("embeddings") if isinstance(results, dict) else None
         if results["ids"] and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
                 document = VectorDocument(
                     id=doc_id,
                     content=results["documents"][0][i],
                     metadata=results["metadatas"][0][i],
-                    embedding=results["embeddings"][0][i] if results["embeddings"] else None
+                    embedding=(result_embeddings[0][i] if result_embeddings and result_embeddings[0] else None)
                 )
                 
                 distance = results["distances"][0][i]
@@ -397,6 +398,7 @@ class VectorStore:
         
         # 解析结果（排除自身）
         search_results = []
+        result_embeddings = results.get("embeddings") if isinstance(results, dict) else None
         if results["ids"] and results["ids"][0]:
             for i, doc_id in enumerate(results["ids"][0]):
                 if doc_id == document_id:
@@ -406,7 +408,7 @@ class VectorStore:
                     id=doc_id,
                     content=results["documents"][0][i],
                     metadata=results["metadatas"][0][i],
-                    embedding=results["embeddings"][0][i] if results["embeddings"] else None
+                    embedding=(result_embeddings[0][i] if result_embeddings and result_embeddings[0] else None)
                 )
                 
                 distance = results["distances"][0][i]
@@ -524,7 +526,7 @@ class VectorStore:
                 id=result["ids"][0],
                 content=result["documents"][0],
                 metadata=result["metadatas"][0],
-                embedding=result["embeddings"][0] if result["embeddings"] else None
+                embedding=(result.get("embeddings") or [None])[0]
             )
         except Exception:
             return None
@@ -553,12 +555,13 @@ class VectorStore:
         )
         
         documents = []
+        result_embeddings = results.get("embeddings") if isinstance(results, dict) else None
         for i, doc_id in enumerate(results["ids"]):
             documents.append(VectorDocument(
                 id=doc_id,
                 content=results["documents"][i],
                 metadata=results["metadatas"][i],
-                embedding=results["embeddings"][i] if results["embeddings"] else None
+                embedding=(result_embeddings[i] if result_embeddings else None)
             ))
         
         return documents

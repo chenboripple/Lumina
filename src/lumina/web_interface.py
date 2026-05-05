@@ -28,6 +28,7 @@ from .executor import Executor
 from .validator import Validator
 from .plugins import get_plugin
 from .config_core import LuminaConfig, USER_CONFIG_FILE
+from .llm import LLMProviderFactory
 
 
 class WebInterface:
@@ -439,11 +440,12 @@ class WebInterface:
                             supported_extensions=self.harness.config.supported_extensions,
                         )
                         aggregated_files.extend(scanned)
+                        source_changed_files = self._count_source_changed_files(scanned, bool(incremental))
 
                         if idx < len(self._scan_state["queue"]):
                             item = self._scan_state["queue"][idx]
                             item["total_files"] = len(scanned)
-                            item["changed_files"] = len(scanned)
+                            item["changed_files"] = source_changed_files
                             item["progress_percent"] = 100.0 if scanned else 0.0
                             item["status"] = "completed"
 
@@ -876,6 +878,11 @@ class WebInterface:
         system_fixed = {
             "config_schema_version": "v2-grouped-config",
             "supported_agents": ["planner", "executor", "validator", "harness"],
+            "supported_llm_providers": LLMProviderFactory.list_providers(),
+            "llm_default_models": {
+                name: LLMProviderFactory.get_default_model(name)
+                for name in LLMProviderFactory.list_providers().keys()
+            },
             "planner_defaults": {
                 "para_categories": dict(Planner.PARA_CATEGORY_MAP),
                 "batch_sizes": dict(Planner.BATCH_SIZES),
@@ -1321,6 +1328,11 @@ class WebInterface:
                 self._scan_state["message"] = "扫描已中断，请重试"
                 self._scan_state["last_event_at"] = datetime.now().isoformat()
 
+        if (not self._scan_state.get("running")) and (not harness_running):
+            self._scan_state["elapsed_seconds"] = 0.0
+            self._scan_state["eta_seconds"] = None
+            self._scan_state["rate_per_minute"] = 0.0
+
         # 非运行且没有队列时，保留最近一次计数，不再被归零。
         if not self._scan_state.get("running") and not queue:
             live_scanned = int(live.get("scanned_files", 0) or 0)
@@ -1330,9 +1342,6 @@ class WebInterface:
             existing_counts["changed"] = max(int(existing_counts.get("changed", 0) or 0), live_changed)
             existing_counts["in_progress"] = 0
             self._scan_state["file_counts"] = existing_counts
-            self._scan_state["elapsed_seconds"] = 0.0
-            self._scan_state["eta_seconds"] = None
-            self._scan_state["rate_per_minute"] = 0.0
             return
 
         # 扫描运行中：把当前 source 的实时文件进度映射到 queue
@@ -1387,13 +1396,14 @@ class WebInterface:
         elapsed_seconds = 0.0
         eta_seconds = None
         rate_per_minute = 0.0
-        if started_at:
+        runtime_active = bool(self._scan_state.get("running")) or harness_running
+        if runtime_active and started_at:
             try:
                 start_dt = datetime.fromisoformat(str(started_at))
                 elapsed_seconds = max(0.0, (datetime.now() - start_dt).total_seconds())
             except Exception:
                 elapsed_seconds = 0.0
-        if harness_running:
+        if runtime_active and harness_running:
             try:
                 elapsed_seconds = max(elapsed_seconds, float(live.get("elapsed_time", 0) or 0))
             except Exception:
@@ -1434,6 +1444,27 @@ class WebInterface:
             elif any(q.get("status") == "completed" for q in queue):
                 self._scan_state["last_status"] = "completed"
                 self._scan_state["phase"] = "completed"
+
+    def _count_source_changed_files(self, scanned_files: List[Any], incremental: bool) -> int:
+        """按增量规则统计某个 source 本轮真正“有变化”的文件数。"""
+        if not incremental:
+            return len(scanned_files)
+        if not self.harness or not getattr(self.harness, "history", None):
+            return len(scanned_files)
+        change_tracker = getattr(self.harness, "change_tracker", None)
+        if not change_tracker:
+            return len(scanned_files)
+
+        changed = 0
+        for file_info in scanned_files:
+            try:
+                has_changed, _ = change_tracker.has_file_changed(file_info.path, force_check_content=False)
+                if has_changed:
+                    changed += 1
+            except Exception:
+                # 检测失败时保守计为有变化，避免漏处理。
+                changed += 1
+        return changed
 
     def _append_failed_item(self, source: str, file: str, message: str, tags: Optional[List[str]] = None):
         """向失败列表追加标准化失败项。"""

@@ -15,6 +15,7 @@ Lumina 会读取 `~/.lumina/lumina.yaml` 中配置的输入源、输出目录、
 - Obsidian 增强输出：frontmatter、callouts、层级标签、related/up/aliases
 - Web 仪表盘：扫描队列、实时进度、最近一次运行结果、失败项批量操作
 - 向量能力：语义搜索、关联笔记、知识图谱
+- **多 LLM Provider 支持**：OpenAI、Anthropic、DeepSeek、阿里云百炼、火山引擎、Kimi、智谱 GLM、Ollama、llama.cpp
 
 ## 安装
 

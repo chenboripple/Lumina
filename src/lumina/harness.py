@@ -352,6 +352,26 @@ class Harness:
             "available": True,
             **self.vector_store.get_stats()
         }
+
+    def _reset_run_state(self):
+        """在每次 run 前重置与本轮运行相关的状态字段。"""
+        now = time.time()
+        self.state.session_id = f"session_{int(now)}"
+        self.state.start_time = now
+        self.state.end_time = None
+        self.state.total_files = 0
+        self.state.scanned_files = 0
+        self.state.changed_files = 0
+        self.state.in_progress_files = 0
+        self.state.processed_files = 0
+        self.state.skipped_files = 0
+        self.state.failed_files = 0
+        self.state.total_iterations = 0
+        self.state.cache_hits = 0
+        self.state.cache_misses = 0
+        self.state.total_cost = 0.0
+        self.state.avg_score = 0.0
+        self.state.errors = []
     
     def run(
         self,
@@ -372,6 +392,7 @@ class Harness:
         Returns:
             详细执行结果报告
         """
+        self._reset_run_state()
         self.state.status = "running"
         self._log_start()
         
@@ -447,6 +468,18 @@ class Harness:
             plan = self.planner.plan(files, existing_notes=existing_notes, content_briefs=content_briefs)
             self._log(f"🎯 Processing strategy: {plan.strategy}")
             self._log(f"📦 Total batches: {len(plan.batches)}")
+
+            # Planner 低价值跳过：标记为“无需处理”，并写入指纹，后续仅在文件变化后重新判断。
+            skipped_by_value = list(getattr(self.planner, "last_skipped_files", []) or [])
+            if skipped_by_value:
+                self.state.skipped_files += len(skipped_by_value)
+                self._log(f"🧠 Planner marked {len(skipped_by_value)} files as no-note-value (skip)")
+                for skipped_file in skipped_by_value:
+                    try:
+                        fingerprint = self.change_tracker.calculate_file_fingerprint(skipped_file.path)
+                        self.change_tracker.mark_as_processed(fingerprint)
+                    except Exception as e:
+                        self._log(f"⚠️  Failed to mark skipped file as processed: {e}", level="warning")
             
             # Phase 2-4: 执行 → 验证 → 迭代
             self._log("\n🚀 Phase 2: Processing files")

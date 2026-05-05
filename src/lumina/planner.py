@@ -152,6 +152,7 @@ class Planner:
             "clusters_created": 0,
             "files_in_clusters": 0,
         }
+        self.last_skipped_files: List[FileInfo] = []
 
     @staticmethod
     def is_supported_extension(file_path: Path, supported_extensions: Optional[List[str]] = None) -> bool:
@@ -431,9 +432,11 @@ class Planner:
         
         # 如果有内容简述，进行智能过滤和合并建议
         if content_briefs:
-            files, merge_groups = self._apply_content_briefs(files, content_briefs)
+            files, merge_groups, skipped_files = self._apply_content_briefs(files, content_briefs)
+            self.last_skipped_files = list(skipped_files)
         else:
             merge_groups = []
+            self.last_skipped_files = []
         
         # 文档聚合
         clustered_files = []
@@ -537,6 +540,7 @@ class Planner:
         brief_map = {b.file_path: b for b in briefs}
         
         filtered_files = []
+        skipped_files: List[FileInfo] = []
         skipped_count = 0
         merge_groups: Dict[str, List[FileInfo]] = {}  # merge_key -> files
         
@@ -557,6 +561,9 @@ class Planner:
             if brief.suggested_action == "skip":
                 skipped_count += 1
                 self.stats["skipped_files"] = self.stats.get("skipped_files", 0) + 1
+                file_info.metadata["learning_action"] = "skip"
+                file_info.metadata["skip_reason"] = brief.metadata.get("reasoning", "low learning value")
+                skipped_files.append(file_info)
                 continue
             
             elif brief.suggested_action == "merge":
@@ -605,7 +612,7 @@ class Planner:
         
         print(f"Content brief filtering: {skipped_count} skipped, {len(merge_file_infos)} merge groups created")
         
-        return filtered_files, merge_file_infos
+        return filtered_files, merge_file_infos, skipped_files
     
     def _find_merge_key(self, brief: ContentBrief, file_info: FileInfo) -> str:
         """根据简述找到合并键"""
