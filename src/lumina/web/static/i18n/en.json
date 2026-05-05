@@ -214,6 +214,19 @@
       }
     }
   },
+  "llm": {
+    "providers": {
+      "openai": "OpenAI (GPT-4, GPT-3.5)",
+      "anthropic": "Anthropic (Claude 3, Claude 2)",
+      "ollama": "Ollama - Local Models",
+      "llamacpp": "llama.cpp - Local Models",
+      "deepseek": "DeepSeek",
+      "bailian": "Alibaba Bailian (Qwen)",
+      "volcengine": "VolcEngine Ark",
+      "kimi": "Kimi (Moonshot)",
+      "glm": "Zhipu GLM"
+    }
+  },
   "repair": {
     "done": "Batch repair done: {repaired} success, {failed} failed",
     "failed": "Batch repair failed"

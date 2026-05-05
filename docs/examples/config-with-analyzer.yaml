@@ -1,5 +1,7 @@
 # Lumina 内容预分析配置示例
 # 用于优化 Token 消耗和智能决策
+#
+# 可用 providers: openai, anthropic, deepseek, bailian, volcengine, kimi, glm, ollama, llamacpp
 
 llm:
   provider: openai
@@ -34,6 +36,19 @@ llm_config_validator:
   provider: openai
   model: gpt-4o-mini
   temperature: 0.2
+
+# ──────────────────────────────────────────────
+# 可替换为国内模型示例（取消注释启用）
+# ──────────────────────────────────────────────
+#
+# llm:
+#   provider: deepseek
+#   api_key: ${DEEPSEEK_API_KEY}
+#   model: deepseek-chat
+#
+# llm_config_analyzer:
+#   provider: ollama
+#   model: llama3
 
 harness:
   max_iterations: 3

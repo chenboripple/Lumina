@@ -145,14 +145,114 @@ llm_validator:
 
 ---
 
+## 更多 LLM 配置示例
+
+### 使用 DeepSeek
+
+```yaml
+llm:
+  provider: deepseek
+  api_key: "sk-..."
+  model: deepseek-chat  # 或 deepseek-coder
+```
+
+### 使用阿里云百炼（通义千问）
+
+```yaml
+llm:
+  provider: bailian
+  api_key: "sk-..."
+  model: qwen-max  # 或 qwen-plus、qwen-turbo
+```
+
+### 使用 Kimi（月之暗面）
+
+```yaml
+llm:
+  provider: kimi
+  api_key: "sk-..."
+  model: moonshot-v1-8k  # 或 moonshot-v1-32k、moonshot-v1-128k
+```
+
+### 使用智谱 GLM
+
+```yaml
+llm:
+  provider: glm
+  api_key: "sk-..."
+  model: glm-4  # 或 glm-3-turbo
+```
+
+### 使用火山引擎（火山方舟）
+
+```yaml
+llm:
+  provider: volcengine
+  api_key: "sk-..."
+  base_url: "https://ark.cn-beijing.volces.com/api/v3"
+  model: "ep-..."  # 需在火山方舟创建自己的 endpoint
+```
+
+### 使用 Ollama 本地模型
+
+```yaml
+# 先启动 ollama 服务
+# ollama serve
+# ollama pull llama3
+
+llm:
+  provider: ollama
+  model: llama3  # 或 mistral、gemma 等已 pull 的模型
+  base_url: "http://localhost:11434/v1"
+  # 不需要 api_key
+```
+
+### 使用 llama.cpp 本地模型
+
+```yaml
+# 先启动 llama.cpp 服务
+# ./server -m ./models/llama-3-8b-instruct.Q4_K_M.gguf --port 8080
+
+llm:
+  provider: llamacpp
+  model: "llama-3-8b-instruct"  # 实际使用的模型由 server 启动参数决定
+  base_url: "http://localhost:8080/v1"
+  # 不需要 api_key
+```
+
+### 混合使用（Planner 用本地模型，Executor 用 DeepSeek）
+
+```yaml
+llm:
+  provider: deepseek
+  api_key: "sk-..."
+  model: deepseek-chat
+
+# Planner 用 ollama 降低成本
+llm_planner:
+  provider: ollama
+  model: llama3
+```
+
+---
+
 ## 字段说明
 
 ### `llm.provider`
 
-| 值 | 说明 |
-|---|---|
-| `openai` | OpenAI 或兼容 OpenAI 协议的服务（默认） |
-| `anthropic` | Anthropic Claude 系列 |
+| 值 | 说明 | 默认 base_url | 默认模型 |
+|---|---|---|---|
+| `openai` | OpenAI 或兼容 OpenAI 协议的服务（默认） | `https://api.openai.com/v1` | `gpt-4` |
+| `anthropic` | Anthropic Claude 系列 | `https://api.anthropic.com` | `claude-3-opus-20240229` |
+| `deepseek` | DeepSeek - 深度求索 | `https://api.deepseek.com/v1` | `deepseek-chat` |
+| `bailian` | 百炼 - 阿里云通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1` | `qwen-max` |
+| `volcengine` | 火山引擎 - 火山方舟 | `https://ark.cn-beijing.volces.com/api/v3` | 需创建 endpoint |
+| `kimi` | Kimi - 月之暗面 | `https://api.moonshot.cn/v1` | `moonshot-v1-8k` |
+| `glm` | 智谱 GLM - 智谱 AI | `https://open.bigmodel.cn/api/paas/v4` | `glm-4` |
+| `ollama` | Ollama 本地模型（无需 api_key） | `http://localhost:11434/v1` | `llama3` |
+| `llamacpp` | llama.cpp 本地模型（无需 api_key） | `http://localhost:8080/v1` | `llama-3-8b-instruct` |
+
+> **api_key 说明**：`ollama` 和 `llamacpp` 不需要 api_key；其他 provider 可通过 `~/.lumina/lumina.yaml` 配置，或从对应环境变量自动读取（`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`DEEPSEEK_API_KEY`、`DASHSCOPE_API_KEY`、`VOLCENGINE_API_KEY`、`MOONSHOT_API_KEY`、`ZHIPU_API_KEY`）。
 
 ### `llm.base_url`
 

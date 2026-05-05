@@ -210,6 +210,19 @@
       }
     }
   },
+  "llm": {
+    "providers": {
+      "openai": "OpenAI (GPT-4, GPT-3.5)",
+      "anthropic": "Anthropic (Claude 3, Claude 2)",
+      "ollama": "Ollama - 本地模型",
+      "llamacpp": "llama.cpp - 本地模型",
+      "deepseek": "DeepSeek - 深度求索",
+      "bailian": "百炼 - 阿里云通义千问",
+      "volcengine": "火山引擎 - 火山方舟",
+      "kimi": "Kimi - 月之暗面",
+      "glm": "智谱 GLM - 智谱 AI"
+    }
+  },
   "repair": {
     "done": "批量修复完成: {repaired} 成功, {failed} 失败",
     "failed": "批量修复失败"

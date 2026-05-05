@@ -1,0 +1,113 @@
+# Lumina 配置示例 - 本地模型与国内 API 配置
+#
+# 此配置展示如何使用 Ollama/llama.cpp 本地模型和国内提供商（DeepSeek、百炼、Kimi、智谱等）
+#
+# 可用 providers:
+# - 本地: ollama, llamacpp
+# - 国内: deepseek, bailian, volcengine, kimi, glm
+# - 国际: openai, anthropic
+
+input:
+  sources:
+    - path: "~/Documents"
+      recursive: true
+  default_recursive: true
+  supported_extensions: [".md", ".txt", ".pdf", ".py", ".js", ".ts"]
+
+output:
+  plugin: obsidian
+  base_dir: "~/Lumina/Notes"
+
+harness:
+  max_iterations: 3
+  quality_threshold: 0.8
+
+# ──────────────────────────────────────────────
+# 方案一：完全本地化（Ollama）
+# ──────────────────────────────────────────────
+# 前置条件：先安装并启动 ollama
+#   brew install ollama
+#   ollama serve
+#   ollama pull llama3
+#
+# llm:
+#   provider: ollama
+#   model: llama3
+#   base_url: "http://localhost:11434/v1"
+#   temperature: 0.3
+#   max_tokens: 2000
+
+# ──────────────────────────────────────────────
+# 方案二：完全本地化（llama.cpp）
+# ──────────────────────────────────────────────
+# 前置条件：下载 gguf 模型并启动 server
+#   ./server -m ./models/llama-3-8b-instruct.Q4_K_M.gguf --port 8080
+#
+# llm:
+#   provider: llamacpp
+#   model: llama-3-8b-instruct
+#   base_url: "http://localhost:8080/v1"
+#   temperature: 0.3
+#   max_tokens: 2000
+
+# ──────────────────────────────────────────────
+# 方案三：使用 DeepSeek
+# ──────────────────────────────────────────────
+# 推荐模型: deepseek-chat, deepseek-coder
+#
+# llm:
+#   provider: deepseek
+#   api_key: "sk-..."
+#   model: deepseek-chat
+#   temperature: 0.3
+#   max_tokens: 2000
+
+# ──────────────────────────────────────────────
+# 方案四：使用阿里云百炼（通义千问）
+# ──────────────────────────────────────────────
+# 推荐模型: qwen-max, qwen-plus, qwen-turbo
+#
+# llm:
+#   provider: bailian
+#   api_key: "sk-..."
+#   model: qwen-max
+#   temperature: 0.3
+#   max_tokens: 2000
+
+# ──────────────────────────────────────────────
+# 方案五：使用 Kimi（月之暗面）
+# ──────────────────────────────────────────────
+# 推荐模型: moonshot-v1-8k, moonshot-v1-32k, moonshot-v1-128k
+#
+# llm:
+#   provider: kimi
+#   api_key: "sk-..."
+#   model: moonshot-v1-8k
+#   temperature: 0.3
+#   max_tokens: 2000
+
+# ──────────────────────────────────────────────
+# 方案六：使用智谱 GLM
+# ──────────────────────────────────────────────
+# 推荐模型: glm-4, glm-3-turbo
+#
+llm:
+  provider: glm
+  api_key: "sk-..."
+  model: glm-4
+  temperature: 0.3
+  max_tokens: 2000
+
+# ──────────────────────────────────────────────
+# 方案七：混合使用（成本优化）
+# ──────────────────────────────────────────────
+# 用本地模型做规划，用 DeepSeek 做生成
+#
+# llm:
+#   provider: deepseek
+#   api_key: "sk-..."
+#   model: deepseek-chat
+#
+# llm_planner:
+#   provider: ollama
+#   model: llama3
