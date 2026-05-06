@@ -62,12 +62,17 @@ const LOCALE_LABELS = {
 // 初始化
 async function init() {
     await initI18n();
-    setupNavigation();
+    if (!window.__LUMINA_REACT_MODE__) {
+        setupNavigation();
+    }
     setupEventListeners();
-    loadDashboardData();
+    if (!window.__LUMINA_REACT_MODE__) {
+        loadDashboardData();
+    }
     startScanStatusTicker();
-    loadNotes();
-    loadConfig();
+    if (!window.__LUMINA_REACT_MODE__) {
+        loadNotes();
+    }
 }
 
 function deepGet(source, path) {
@@ -197,7 +202,9 @@ async function initI18n() {
     const savedPreference = localStorage.getItem(I18N_STORAGE_KEY);
     state.i18n.preference = savedPreference || 'auto';
     await applyLocaleFromPreference();
-    setupLocaleSelector();
+    if (!window.__LUMINA_REACT_MODE__) {
+        setupLocaleSelector();
+    }
 }
 
 function startScanStatusTicker() {
@@ -245,7 +252,6 @@ function setupEventListeners() {
             state.i18n.preference = value;
             localStorage.setItem(I18N_STORAGE_KEY, value);
             await applyLocaleFromPreference();
-            await loadConfig();
             if (state.scanStatus) {
                 renderScanStatus(state.scanStatus);
             }
@@ -255,16 +261,39 @@ function setupEventListeners() {
         });
     }
 
-    // 搜索
-    document.getElementById('btn-search').addEventListener('click', performSearch);
-    document.getElementById('search-input').addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') performSearch();
+    window.addEventListener('lumina:locale-preference-changed', async (evt) => {
+        const value = String(evt?.detail?.value || 'auto');
+        state.i18n.preference = value;
+        localStorage.setItem(I18N_STORAGE_KEY, value);
+        await applyLocaleFromPreference();
+        if (state.scanStatus && !window.__LUMINA_REACT_MODE__) {
+            renderScanStatus(state.scanStatus);
+        }
+        if (failureModal && !failureModal.classList.contains('hidden')) {
+            renderFailureModalBody();
+        }
     });
 
+    if (!window.__LUMINA_REACT_MODE__) {
+        const btnSearch = document.getElementById('btn-search');
+        const searchInput = document.getElementById('search-input');
+        if (btnSearch) {
+            btnSearch.addEventListener('click', performSearch);
+        }
+        if (searchInput) {
+            searchInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') performSearch();
+            });
+        }
+    }
+
     // 模态框
-    document.getElementById('btn-close-modal').addEventListener('click', closeModal);
-    document.getElementById('btn-close-modal-2').addEventListener('click', closeModal);
-    document.getElementById('btn-regenerate').addEventListener('click', regenerateNote);
+    const closeModal1 = document.getElementById('btn-close-modal');
+    const closeModal2 = document.getElementById('btn-close-modal-2');
+    const regenerateBtn = document.getElementById('btn-regenerate');
+    if (closeModal1) closeModal1.addEventListener('click', closeModal);
+    if (closeModal2) closeModal2.addEventListener('click', closeModal);
+    if (regenerateBtn) regenerateBtn.addEventListener('click', regenerateNote);
     const failureClose1 = document.getElementById('btn-close-failure-modal');
     const failureClose2 = document.getElementById('btn-close-failure-modal-2');
     if (failureClose1) failureClose1.addEventListener('click', closeFailureModal);
@@ -280,29 +309,43 @@ function setupEventListeners() {
     if (failureRegenerateBtn) failureRegenerateBtn.addEventListener('click', batchRegenerateFailures);
     if (failureDeleteBtn) failureDeleteBtn.addEventListener('click', batchDeleteFailures);
 
-    // 相似度滑块
-    document.getElementById('similarity-slider').addEventListener('input', (e) => {
-        document.getElementById('similarity-value').textContent = e.target.value;
-    });
-    document.getElementById('btn-refresh-graph').addEventListener('click', loadGraph);
-
-    // 快速操作
-    document.getElementById('btn-scan').addEventListener('click', scanDirectory);
-    document.getElementById('btn-batch-repair').addEventListener('click', batchRepair);
-    document.getElementById('btn-refresh').addEventListener('click', refreshData);
-
-    // 按源文件重生成
-    const sourceInput = document.getElementById('source-file-input');
-    const regenerateSourceBtn = document.getElementById('btn-regenerate-source');
-    if (regenerateSourceBtn) {
-        regenerateSourceBtn.addEventListener('click', regenerateBySourcePath);
+    // 相似度滑块（React 模式下由组件内部管理）
+    if (!window.__LUMINA_REACT_MODE__) {
+        const similaritySlider = document.getElementById('similarity-slider');
+        const refreshGraphBtn = document.getElementById('btn-refresh-graph');
+        if (similaritySlider) {
+            similaritySlider.addEventListener('input', (e) => {
+                const valueEl = document.getElementById('similarity-value');
+                if (valueEl) {
+                    valueEl.textContent = e.target.value;
+                }
+            });
+        }
+        if (refreshGraphBtn) refreshGraphBtn.addEventListener('click', loadGraph);
     }
-    if (sourceInput) {
-        sourceInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                regenerateBySourcePath();
-            }
-        });
+
+    if (!window.__LUMINA_REACT_MODE__) {
+        const scanBtn = document.getElementById('btn-scan');
+        const batchRepairBtn = document.getElementById('btn-batch-repair');
+        const refreshBtn = document.getElementById('btn-refresh');
+        if (scanBtn) scanBtn.addEventListener('click', scanDirectory);
+        if (batchRepairBtn) batchRepairBtn.addEventListener('click', batchRepair);
+        if (refreshBtn) refreshBtn.addEventListener('click', refreshData);
+    }
+
+    if (!window.__LUMINA_REACT_MODE__) {
+        const sourceInput = document.getElementById('source-file-input');
+        const regenerateSourceBtn = document.getElementById('btn-regenerate-source');
+        if (regenerateSourceBtn) {
+            regenerateSourceBtn.addEventListener('click', regenerateBySourcePath);
+        }
+        if (sourceInput) {
+            sourceInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    regenerateBySourcePath();
+                }
+            });
+        }
     }
 }
 
@@ -347,6 +390,9 @@ async function apiRequest(endpoint, options = {}) {
 
 // 仪表板数据
 async function loadDashboardData() {
+    if (window.__LUMINA_REACT_MODE__) {
+        return;
+    }
     try {
         const stats = await apiRequest('/api/stats');
 
@@ -369,7 +415,10 @@ async function updateScanStatus() {
         if (!response.ok) return;
         const status = await response.json();
         state.scanStatus = status || null;
-        renderScanStatus(status || {});
+        if (!window.__LUMINA_REACT_MODE__) {
+            renderScanStatus(status || {});
+        }
+        window.dispatchEvent(new CustomEvent('lumina:scan-status', { detail: status || {} }));
         if (failureModal && !failureModal.classList.contains('hidden')) {
             renderFailureModalBody();
         }
@@ -1182,262 +1231,6 @@ async function regenerateBySourcePath() {
     }
 }
 
-// 配置管理
-async function loadConfig() {
-    const container = document.getElementById('config-form');
-
-    try {
-        const config = await apiRequest('/api/config');
-        const systemCfg = config.system_config || {};
-        const fixedCfg = systemCfg.fixed || {};
-        const runtimeCfg = systemCfg.runtime || {};
-        const serviceCfg = systemCfg.service || {};
-        const currentSnapshot = config.current_snapshot || {};
-        const rawUserConfig = config.raw_user_config || '';
-        const agentCfg = (config.agent_config || {}).user_defined || {};
-        const harnessCfg = currentSnapshot.harness || agentCfg.harness || {};
-        const inputPref = currentSnapshot.input || (config.user_preferences || {}).input || {};
-        const outputPref = currentSnapshot.output || (config.user_preferences || {}).output || {};
-        const llmShared = currentSnapshot.llm || agentCfg.llm_shared || {};
-        const llmPlanner = currentSnapshot.llm_planner || agentCfg.llm_planner || {};
-        const llmExecutor = currentSnapshot.llm_executor || agentCfg.llm_executor || {};
-        const llmValidator = currentSnapshot.llm_validator || agentCfg.llm_validator || {};
-
-        container.innerHTML = `
-            <form id="config-update-form" class="config-sections">
-                <section class="config-section">
-                    <h3>${escapeHtml(t('config.page.current_config.title', {}, 'Current Configuration'))}</h3>
-                    <p class="hint">${escapeHtml(t('config.page.current_config.hint', {}, 'You can view and edit the current user configuration here.'))}</p>
-                    <div class="config-grid-2">
-                        <div class="config-card readonly">
-                            <div class="form-label">${escapeHtml(t('config.page.current_config.snapshot', {}, 'Active Config Snapshot'))}</div>
-                            <pre class="json-preview config-tall-preview">${escapeHtml(JSON.stringify(currentSnapshot, null, 2))}</pre>
-                        </div>
-                        <div class="config-card">
-                            <div class="form-label">${escapeHtml(t('config.page.current_config.raw_yaml', {}, 'User Config YAML (editable)'))}</div>
-                            <textarea class="form-input json-input config-tall-preview" id="cfg-raw-user-config">${escapeHtml(rawUserConfig || t('config.page.current_config.empty_yaml', {}, '# Empty user config'))}</textarea>
-                            <div class="config-actions inline-top-gap">
-                                <button type="button" class="btn btn-secondary" id="btn-save-raw-config">${escapeHtml(t('config.page.actions.save_yaml', {}, 'Save YAML Config'))}</button>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="config-section">
-                    <h3>${escapeHtml(t('config.page.system.title', {}, 'System Configuration'))}</h3>
-                                <textarea class="form-input json-input" id="cfg-llm-shared" rows="8">${escapeHtml(JSON.stringify(llmShared || {}, null, 2))}</textarea>
-                    <div class="config-grid-2">
-                        <div class="config-card readonly">
-                            <div class="form-label">${escapeHtml(t('config.page.system.schema_version', {}, 'Schema Version'))}</div>
-                                <textarea class="form-input json-input" id="cfg-llm-planner" rows="5">${escapeHtml(JSON.stringify(llmPlanner || {}, null, 2))}</textarea>
-                            <div class="form-label">${escapeHtml(t('config.page.system.supported_agents', {}, 'Supported Agents'))}</div>
-                            <div class="readonly-value">${escapeHtml((fixedCfg.supported_agents || []).join(', ') || '-')}</div>
-                            <div class="form-label">${escapeHtml(t('config.page.system.planner_default_para', {}, 'Planner Default PARA'))}</div>
-                                <textarea class="form-input json-input" id="cfg-llm-executor" rows="5">${escapeHtml(JSON.stringify(llmExecutor || {}, null, 2))}</textarea>
-                        </div>
-                        <div class="config-card readonly">
-                            <div class="form-label">${escapeHtml(t('config.page.system.runtime_status', {}, 'Runtime Status'))}</div>
-                                <textarea class="form-input json-input" id="cfg-llm-validator" rows="5">${escapeHtml(JSON.stringify(llmValidator || {}, null, 2))}</textarea>
-                            <div class="form-label">${escapeHtml(t('config.page.system.current_session', {}, 'Current Session'))}</div>
-                            <div class="readonly-value">${escapeHtml(runtimeCfg.session_id || '-')}</div>
-                            <div class="form-label">${escapeHtml(t('config.page.system.current_output_dir', {}, 'Current Output Directory'))}</div>
-                            <div class="readonly-value">${escapeHtml(runtimeCfg.output_dir || '-')}</div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.system.log_retention_days', {}, 'Log Retention Days'))}</label>
-                                <input type="number" class="form-input" id="cfg-log-retention-days" min="0" value="${Number(serviceCfg.log_retention_days ?? 15)}">
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="config-section">
-                    <h3>${escapeHtml(t('config.page.agent.title', {}, 'Agent Configuration'))}</h3>
-                    <div class="config-grid-2">
-                        <div class="config-card">
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.agent.max_iterations', {}, 'Harness Max Iterations'))}</label>
-                                <input type="number" class="form-input" id="cfg-max-iterations" min="1" max="10" value="${Number(harnessCfg.max_iterations ?? 3)}">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.agent.quality_threshold', {}, 'Harness Quality Threshold'))}</label>
-                                <input type="number" class="form-input" id="cfg-quality-threshold" min="0" max="1" step="0.05" value="${Number(harnessCfg.quality_threshold ?? 0.8)}">
-                            </div>
-                            <div class="form-group form-checkbox">
-                                <input type="checkbox" id="cfg-incremental" ${harnessCfg.incremental ? 'checked' : ''}>
-                                <label for="cfg-incremental">${escapeHtml(t('config.page.agent.incremental', {}, 'Incremental Processing'))}</label>
-                            </div>
-                            <div class="form-group form-checkbox">
-                                <input type="checkbox" id="cfg-parallel" ${harnessCfg.parallel ? 'checked' : ''}>
-                                <label for="cfg-parallel">${escapeHtml(t('config.page.agent.parallel', {}, 'Parallel Processing'))}</label>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.agent.max_workers', {}, 'Parallel Worker Count'))}</label>
-                                <input type="number" class="form-input" id="cfg-max-workers" min="1" max="32" value="${Number(harnessCfg.max_workers ?? 4)}">
-                            </div>
-                            <div class="form-group form-checkbox">
-                                <input type="checkbox" id="cfg-enable-vector-store" ${harnessCfg.enable_vector_store ? 'checked' : ''}>
-                                <label for="cfg-enable-vector-store">${escapeHtml(t('config.page.agent.enable_vector_store', {}, 'Enable Vector Store'))}</label>
-                            </div>
-                        </div>
-                        <div class="config-card">
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.agent.llm_shared', {}, 'Shared LLM Config (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-llm-shared" rows="8">${escapeHtml(JSON.stringify(agentCfg.llm_shared || {}, null, 2))}</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.agent.llm_planner', {}, 'Planner LLM Override (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-llm-planner" rows="5">${escapeHtml(JSON.stringify(agentCfg.llm_planner || {}, null, 2))}</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.agent.llm_executor', {}, 'Executor LLM Override (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-llm-executor" rows="5">${escapeHtml(JSON.stringify(agentCfg.llm_executor || {}, null, 2))}</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.agent.llm_validator', {}, 'Validator LLM Override (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-llm-validator" rows="5">${escapeHtml(JSON.stringify(agentCfg.llm_validator || {}, null, 2))}</textarea>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <section class="config-section">
-                    <h3>${escapeHtml(t('config.page.user.title', {}, 'User Preferences'))}</h3>
-                    <div class="config-grid-2">
-                        <div class="config-card">
-                            <div class="form-group form-checkbox">
-                                <input type="checkbox" id="cfg-default-recursive" ${inputPref.default_recursive ? 'checked' : ''}>
-                                <label for="cfg-default-recursive">${escapeHtml(t('config.page.user.default_recursive', {}, 'Default Recursive for Input Sources'))}</label>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.supported_extensions', {}, 'Supported Extensions (JSON Array)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-supported-extensions" rows="4">${escapeHtml(JSON.stringify(inputPref.supported_extensions || [], null, 2))}</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.input_sources', {}, 'Input Source List (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-input-sources" rows="8">${escapeHtml(JSON.stringify(inputPref.sources || [], null, 2))}</textarea>
-                            </div>
-                        </div>
-                        <div class="config-card">
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.output_plugin', {}, 'Output Plugin'))}</label>
-                                <select class="form-input" id="cfg-output-plugin">
-                                    <option value="obsidian" ${outputPref.plugin === 'obsidian' ? 'selected' : ''}>Obsidian</option>
-                                    <option value="plain" ${outputPref.plugin === 'plain' ? 'selected' : ''}>Plain Markdown</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.output_dir', {}, 'Output Directory'))}</label>
-                                <input type="text" class="form-input" id="cfg-output-base-dir" value="${escapeHtml(outputPref.base_dir || '')}">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.vault_path', {}, 'Vault Path'))}</label>
-                                <input type="text" class="form-input" id="cfg-output-vault-path" value="${escapeHtml(outputPref.vault_path || '')}">
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.output_structure', {}, 'Output Structure (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-output-structure" rows="4">${escapeHtml(JSON.stringify(outputPref.structure || {}, null, 2))}</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.naming_rules', {}, 'Naming Rules (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-output-naming" rows="4">${escapeHtml(JSON.stringify(outputPref.naming || {}, null, 2))}</textarea>
-                            </div>
-                            <div class="form-group">
-                                <label class="form-label">${escapeHtml(t('config.page.user.note_organization', {}, 'Note Organization Rules (JSON)'))}</label>
-                                <textarea class="form-input json-input" id="cfg-note-organization" rows="10">${escapeHtml(JSON.stringify(outputPref.note_organization || {}, null, 2))}</textarea>
-                            </div>
-                        </div>
-                    </div>
-                </section>
-
-                <div class="config-actions">
-                    <button type="submit" class="btn btn-primary">${escapeHtml(t('config.page.actions.save_all', {}, 'Save All Configuration'))}</button>
-                </div>
-            </form>
-        `;
-
-        document.getElementById('config-update-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-
-            const parseJson = (id, fallback) => {
-                const raw = (document.getElementById(id)?.value || '').trim();
-                if (!raw) return fallback;
-                return JSON.parse(raw);
-            };
-
-            try {
-                const payload = {
-                    system_config: {
-                        service: {
-                            log_retention_days: Number(document.getElementById('cfg-log-retention-days').value || 15)
-                        }
-                    },
-                    agent_config: {
-                        user_defined: {
-                            harness: {
-                                max_iterations: Number(document.getElementById('cfg-max-iterations').value || 3),
-                                quality_threshold: Number(document.getElementById('cfg-quality-threshold').value || 0.8),
-                                incremental: document.getElementById('cfg-incremental').checked,
-                                parallel: document.getElementById('cfg-parallel').checked,
-                                max_workers: Number(document.getElementById('cfg-max-workers').value || 4),
-                                enable_vector_store: document.getElementById('cfg-enable-vector-store').checked,
-                            },
-                            llm_shared: parseJson('cfg-llm-shared', {}),
-                            llm_planner: parseJson('cfg-llm-planner', {}),
-                            llm_executor: parseJson('cfg-llm-executor', {}),
-                            llm_validator: parseJson('cfg-llm-validator', {}),
-                        }
-                    },
-                    user_preferences: {
-                        input: {
-                            default_recursive: document.getElementById('cfg-default-recursive').checked,
-                            supported_extensions: parseJson('cfg-supported-extensions', []),
-                            sources: parseJson('cfg-input-sources', []),
-                        },
-                        output: {
-                            plugin: document.getElementById('cfg-output-plugin').value,
-                            base_dir: document.getElementById('cfg-output-base-dir').value,
-                            vault_path: document.getElementById('cfg-output-vault-path').value,
-                            structure: parseJson('cfg-output-structure', {}),
-                            naming: parseJson('cfg-output-naming', {}),
-                            note_organization: parseJson('cfg-note-organization', {}),
-                        }
-                    }
-                };
-
-                await apiRequest('/api/config', {
-                    method: 'POST',
-                    body: JSON.stringify(payload)
-                });
-
-                showToast(t('config.saved', {}, 'Configuration saved and hot reloaded'));
-                await loadConfig();
-            } catch (error) {
-                console.error('Config save failed:', error);
-                showToast(t('config.save_failed', {}, 'Failed to save config, please check JSON format'), 'error');
-            }
-        });
-
-        document.getElementById('btn-save-raw-config').addEventListener('click', async () => {
-            const rawText = document.getElementById('cfg-raw-user-config').value;
-            try {
-                await apiRequest('/api/config', {
-                    method: 'POST',
-                    body: JSON.stringify({ raw_user_config: rawText })
-                });
-                showToast(t('config.raw_saved', {}, 'YAML config saved and reloaded'));
-                await loadConfig();
-            } catch (error) {
-                console.error('Raw config save failed:', error);
-                showToast(t('config.raw_save_failed', {}, 'Failed to save YAML config, please check format'), 'error');
-            }
-        });
-
-    } catch (error) {
-        console.error('Failed to load config:', error);
-        container.innerHTML = `<p class="hint">${escapeHtml(t('config.load_failed', {}, 'Failed to load config'))}</p>`;
-    }
-}
-
 // 快速操作
 async function scanDirectory() {
     if (scanPollTimer) {
@@ -1590,5 +1383,27 @@ function formatDuration(seconds) {
     return t('duration.seconds', { seconds: secs }, `${secs}s`);
 }
 
-// 启动
-init();
+// 暴露给 React 组件调用（渐进迁移期间）
+window.scanDirectory = scanDirectory;
+window.batchRepair = batchRepair;
+window.refreshData = refreshData;
+window.loadGraph = loadGraph;
+window.loadNotes = loadNotes;
+window.luminaTranslate = t;
+window.openNoteDetail = openNoteDetail;
+window.regenerateBySourcePath = regenerateBySourcePath;
+
+// 启动（支持 React 外壳渲染后再初始化，避免节点未就绪）
+function startAppOnce() {
+    if (window.__LUMINA_APP_STARTED__) return;
+    window.__LUMINA_APP_STARTED__ = true;
+    init();
+}
+
+window.addEventListener('lumina:react-ready', startAppOnce);
+
+if (window.__LUMINA_REACT_READY__) {
+    startAppOnce();
+} else if (!window.__LUMINA_REACT_MODE__) {
+    startAppOnce();
+}

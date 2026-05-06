@@ -897,6 +897,65 @@ def _detect_common_dirs() -> List[Path]:
     return [p for p in candidates if p.exists() and p.is_dir()]
 
 
+def _detect_obsidian_vaults() -> List[Path]:
+    """自动检测 Obsidian Vault 位置
+
+    按优先级尝试以下位置：
+    1. macOS: ~/Library/Mobile Documents/iCloud~md~obsidian/Documents/
+    2. macOS: ~/Documents/Obsidian
+    3. macOS: ~/Obsidian
+    4. Windows: ~/Documents/Obsidian
+    5. Windows: ~\Obsidian
+    6. Linux: ~/Documents/Obsidian
+    7. Linux: ~/Obsidian
+    8. 搜索 home 目录下包含 .obsidian 配置目录的文件夹
+    """
+    detected = []
+    import platform
+
+    system = platform.system()
+    home = Path.home()
+
+    # 系统特定路径
+    if system == "Darwin":  # macOS
+        candidates = [
+            home / "Library" / "Mobile Documents" / "iCloud~md~obsidian" / "Documents",
+            home / "Documents" / "Obsidian",
+            home / "Obsidian",
+        ]
+    elif system == "Windows":
+        candidates = [
+            home / "Documents" / "Obsidian",
+            home / "Obsidian",
+        ]
+    else:  # Linux
+        candidates = [
+            home / "Documents" / "Obsidian",
+            home / "Obsidian",
+        ]
+
+    for candidate in candidates:
+        if candidate.exists() and candidate.is_dir():
+            # 检查是否是 Obsidian vault（有 .obsidian 目录）
+            if (candidate / ".obsidian").exists():
+                detected.append(candidate)
+            # 或者检查是否有子目录包含 .obsidian
+            for subdir in candidate.iterdir():
+                if subdir.is_dir() and (subdir / ".obsidian").exists():
+                    detected.append(subdir)
+
+    # 去重并排序（优先深度较浅的目录）
+    unique = []
+    seen = set()
+    for p in detected:
+        resolved = p.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(resolved)
+    unique.sort(key=lambda p: len(str(p)))
+    return unique
+
+
 def _print_panel(console, title: str, content: str, style: str = "cyan"):
     """打印面板"""
     if RICH_AVAILABLE:
@@ -1194,15 +1253,37 @@ def init(force):
     else:
         click.echo("\n📁 2. 选择输出目录")
 
-    output_candidates = [
+    # 检测 Obsidian vault
+    obsidian_vaults = _detect_obsidian_vaults()
+    if RICH_AVAILABLE and obsidian_vaults:
+        console.print(f"[green]✓[/green] 检测到 {len(obsidian_vaults)} 个 Obsidian Vault")
+    elif obsidian_vaults:
+        click.echo(f"✓ 检测到 {len(obsidian_vaults)} 个 Obsidian Vault")
+
+    # 构建候选列表：Obsidian Vaults > 默认目录
+    output_candidates = []
+    for vault in obsidian_vaults:
+        output_candidates.append(vault / "Lumina")
+    output_candidates.extend([
         Path.home() / "Lumina" / "Notes",
         Path.home() / "Obsidian" / "Lumina",
-    ]
+    ])
+
+    # 去重（如果有多个）
+    unique_candidates = []
+    seen = set()
+    for p in output_candidates:
+        resolved = str(p.resolve())
+        if resolved not in seen:
+            seen.add(resolved)
+            unique_candidates.append(p)
+    output_candidates = unique_candidates
+
     output_dir = _select_directory(
         console,
         "请选择输出目录",
         output_candidates,
-        default=str(Path.home() / "Lumina" / "Notes"),
+        default=str(output_candidates[0]) if output_candidates else str(Path.home() / "Lumina" / "Notes"),
     )
 
     # 3. 选择输出插件 (Obsidian / Notion / Plain)
