@@ -309,37 +309,68 @@ class BatchRepairManager:
         )
     
     def _repair_single(self, task: RepairTask) -> Dict[str, Any]:
-        """修复单个笔记"""
+        """修复单个笔记
+
+        实际执行流程：
+        1. 读取源文件内容
+        2. 调用 Harness 重新处理
+        3. 验证新结果质量
+        4. 保存或替换笔记
+        """
         self.current_task = task
-        
+
         try:
-            # 构建一个简单的执行上下文
-            from .executor import NoteOutput
-            
             # 读取源文件
-            source_path = task.source_path
-            if not Path(source_path).exists():
-                # 尝试从笔记路径反向查找源文件
-                # 这里简化处理，直接返回
+            source_path = Path(task.source_path)
+            if not source_path.exists():
                 return {
                     "success": False,
                     "best_score": task.current_score,
-                    "error": "Source file not found"
+                    "error": f"Source file not found: {source_path}"
                 }
-            
-            # 使用 harness 重新处理
-            # 这里简化处理，实际需要调用完整的 harness 流程
-            
-            # 模拟结果
-            new_score = min(task.current_score + 0.2, 1.0)
-            
-            return {
-                "success": True,
-                "best_score": new_score,
-                "iterations": 3,
-                "final_passed": True
-            }
-            
+
+            # 调用 Harness 重新处理源文件
+            if self.harness:
+                try:
+                    # 使用 Harness 处理单个文件
+                    result = self.harness.process_single_file(
+                        str(source_path),
+                        quality_threshold=task.threshold
+                    )
+
+                    if result and result.get("success"):
+                        new_score = result.get("quality_score", task.current_score)
+                        improvement = new_score - task.current_score
+
+                        return {
+                            "success": True,
+                            "best_score": new_score,
+                            "improvement": improvement,
+                            "iterations": result.get("iterations", 1),
+                            "final_passed": new_score >= task.threshold,
+                            "output_path": result.get("output_path", ""),
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "best_score": task.current_score,
+                            "error": result.get("error", "Processing failed")
+                        }
+
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "best_score": task.current_score,
+                        "error": f"Harness processing error: {str(e)}"
+                    }
+            else:
+                # 没有 harness 时，降级处理：重新读取并保存
+                return {
+                    "success": False,
+                    "best_score": task.current_score,
+                    "error": "Harness not available for repair"
+                }
+
         except Exception as e:
             return {
                 "success": False,

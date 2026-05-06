@@ -12,10 +12,19 @@ import json
 import requests
 
 
+from .utils.logging import get_logger, timed
+
+logger = get_logger("lumina.llm")
+
 def _log_llm(message: str, level: str = "INFO"):
-    """输出 LLM 请求日志"""
-    timestamp = time.strftime("%H:%M:%S")
-    print(f"[{timestamp}] [{level}] LLM: {message}")
+    """输出 LLM 请求日志（向后兼容）"""
+    log_func = {
+        "ERROR": logger.error,
+        "WARNING": logger.warning,
+        "INFO": logger.info,
+        "DEBUG": logger.debug,
+    }.get(level, logger.info)
+    log_func(message)
 
 
 @dataclass
@@ -107,6 +116,7 @@ class BaseLLMProvider(ABC):
             raise ValueError(f"LLM config invalid: {'; '.join(errors)}")
 
     @abstractmethod
+    @timed
     def complete(self, prompt: str, **kwargs) -> str:
         """同步完成请求"""
         pass

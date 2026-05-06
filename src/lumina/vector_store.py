@@ -387,7 +387,7 @@ class VectorStore:
         
         # 使用参考文档的嵌入向量搜索
         embeddings = doc.get("embeddings")
-        if not embeddings:
+        if embeddings is None or (isinstance(embeddings, list) and len(embeddings) == 0):
             raise ValueError(f"Embedding not found for document: {document_id}")
         reference_embedding = embeddings[0]
         

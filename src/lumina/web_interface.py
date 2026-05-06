@@ -1481,22 +1481,213 @@ class WebInterface:
         })
     
     def _get_low_quality_notes(self, min_score: float) -> List[Dict]:
-        """获取低质量笔记"""
+        """获取低质量笔记
+
+        从历史记录中找出质量分数低于阈值的笔记
+        """
         low_quality = []
-        
-        if self.harness and self.harness.history:
-            # 从历史记录获取
-            sessions = self.harness.history.get_all_sessions(limit=100)
-            for session in sessions:
-                # 这里需要实现从历史记录获取低质量笔记的逻辑
-                pass
-        
+
+        try:
+            # 首先尝试从输出目录扫描并读取 lumina_score
+            if self.lumina_config:
+                output_dir = Path(self.lumina_config.output.base_dir).expanduser()
+                if output_dir.exists():
+                    for md_file in output_dir.rglob("*.md"):
+                        try:
+                            content = md_file.read_text(encoding='utf-8')
+                            # 尝试从 frontmatter 提取分数
+                            score = self._extract_note_score(content)
+                            if score is not None and score < min_score:
+                                low_quality.append({
+                                    "id": str(md_file.relative_to(output_dir)),
+                                    "path": str(md_file),
+                                    "score": score,
+                                    "source": "frontmatter"
+                                })
+                        except Exception:
+                            continue
+
+            # 另外从历史记录中查找
+            if self.harness and hasattr(self.harness, "history") and self.harness.history:
+                # 从历史记录获取最近的处理记录
+                try:
+                    history_records = self.harness.history.get_recent_records(limit=100)
+                    for record in history_records:
+                        if record.get("best_score") and record["best_score"] < min_score:
+                            # 检查是否已经在列表中
+                            exists = any(n.get("path") == record.get("file_path") for n in low_quality)
+                            if not exists:
+                                low_quality.append({
+                                    "id": record.get("file_path", ""),
+                                    "path": record.get("file_path", ""),
+                                    "score": record.get("best_score", 0),
+                                    "source": "history"
+                                })
+                except Exception:
+                    pass
+
+            # 按分数排序（最低的在前）
+            low_quality.sort(key=lambda x: x["score"])
+
+        except Exception:
+            pass
+
         return low_quality
-    
+
+    def _extract_note_score(self, content: str) -> Optional[float]:
+        """从笔记内容中提取 lumina_score
+
+        支持从 frontmatter 或内容中提取
+        """
+        try:
+            # 尝试从 frontmatter 提取
+            if content.startswith('---'):
+                parts = content.split('---', 2)
+                if len(parts) >= 3:
+                    try:
+                        import yaml
+                        frontmatter = yaml.safe_load(parts[1])
+                        if frontmatter and 'lumina_score' in frontmatter:
+                            return float(frontmatter['lumina_score'])
+                    except Exception:
+                        pass
+
+            # 尝试从内容中匹配
+            import re
+            match = re.search(r'lumina_score[:\s]+([\d.]+)', content.lower())
+            if match:
+                try:
+                    return float(match.group(1))
+                except Exception:
+                    pass
+
+            # 备用：匹配 score
+            match = re.search(r'score[:\s]+([\d.]+)', content.lower())
+            if match:
+                try:
+                    return float(match.group(1))
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        return None
+
     def _reprocess_note(self, note: Dict) -> Dict:
-        """重新处理笔记"""
-        # 实现重新处理逻辑
-        return {"success": False, "best_score": 0}
+        """重新处理笔记
+
+        通过 Harness 重新生成笔记
+        """
+        try:
+            file_path = note.get("path", "")
+            if not file_path or not Path(file_path).exists():
+                return {
+                    "success": False,
+                    "best_score": note.get("score", 0),
+                    "error": "File not found"
+                }
+
+            # 使用 Harness 处理单个文件
+            if self.harness:
+                try:
+                    # 尝试查找源文件（从历史记录或从笔记内容推断）
+                    source_path = self._find_source_file_for_note(file_path)
+                    if not source_path or not source_path.exists():
+                        return {
+                            "success": False,
+                            "best_score": note.get("score", 0),
+                            "error": "Source file not found"
+                        }
+
+                    # 重新处理
+                    from pathlib import Path
+                    import sys
+                    from .cli import _ensure_runtime_dependencies
+                    from .cli import _build_harness_from_config
+
+                    # 确保运行环境
+                    _ensure_runtime_dependencies(enable_vector=False)
+
+                    # 构建 harness
+                    harness = _build_harness_from_config(
+                        self.lumina_config,
+                        vector_enabled=False
+                    )
+
+                    # 处理单个文件
+                    results = harness.process_directory(
+                        str(source_path.parent),
+                        recursive=False,
+                        single_file=str(source_path.name)
+                    )
+
+                    # 提取结果
+                    if results and len(results) > 0:
+                        result = results[0]
+                        return {
+                            "success": result.get("success", False),
+                            "best_score": result.get("score", note.get("score", 0)),
+                            "error": result.get("error") if not result.get("success") else None,
+                            "output_path": result.get("output_path")
+                        }
+                    else:
+                        return {
+                            "success": False,
+                            "best_score": note.get("score", 0),
+                            "error": "No result from processing"
+                        }
+
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "best_score": note.get("score", 0),
+                        "error": f"Processing error: {str(e)}"
+                    }
+            else:
+                return {
+                    "success": False,
+                    "best_score": note.get("score", 0),
+                    "error": "Harness not available"
+                }
+
+        except Exception as e:
+            return {
+                "success": False,
+                "best_score": note.get("score", 0),
+                "error": str(e)
+            }
+
+    def _find_source_file_for_note(self, note_path: str) -> Optional[Path]:
+        """尝试为输出笔记找到对应的源文件"""
+        try:
+            # 方法1: 从历史记录查找
+            if self.harness and hasattr(self.harness, "history") and self.harness.history:
+                note_path_obj = Path(note_path)
+                records = self.harness.history.get_records_for_file(str(note_path_obj.stem))
+                if records:
+                    record = records[0]
+                    source_path = Path(record.get("file_path", ""))
+                    if source_path.exists():
+                        return source_path
+
+            # 方法2: 从笔记内容中提取源信息
+            try:
+                content = Path(note_path).read_text(encoding='utf-8')
+                import re
+                # 尝试提取 source:
+                match = re.search(r'source[:\s]+[\"\']?([^\n\"\'\[\]]+)[\"\']?', content)
+                if match:
+                    source_candidate = match.group(1).strip()
+                    source_path = Path(source_candidate).expanduser()
+                    if source_path.exists():
+                        return source_path
+            except Exception:
+                pass
+
+        except Exception:
+            pass
+
+        return None
     
     def run(self, debug=False):
         """启动 Web 服务器"""
