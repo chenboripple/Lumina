@@ -63,47 +63,17 @@ def _module_available(module_name: str) -> bool:
         return False
 
 
-def _is_chromadb_compatible() -> bool:
-    """当前项目使用旧版 Chroma 客户端配置，需 chromadb<0.5。"""
-    try:
-        version = importlib.metadata.version("chromadb")
-        parts = version.split(".")
-        major = int(parts[0]) if len(parts) > 0 else 0
-        minor = int(parts[1]) if len(parts) > 1 else 0
-        if major >= 1:
-            return False
-        if major == 0 and minor >= 5:
-            return False
-        return True
-    except Exception:
-        return False
-
-
-def _is_numpy_compatible_for_chromadb() -> bool:
-    """chromadb 0.4.x 在本项目路径下需要 numpy<2。"""
-    try:
-        version = importlib.metadata.version("numpy")
-        major = int(version.split(".")[0])
-        return major < 2
-    except Exception:
-        return False
-
-
 def ensure_runtime_dependencies():
     """安装后补齐关键运行依赖（缺失则自动安装）。"""
     deps = [
         ("PyPDF2", "PyPDF2"),
         ("pdfplumber", "pdfplumber"),
         ("PyMuPDF", "fitz"),
-        ("chromadb", "chromadb"),
+        ("chromadb>=1.0.0,<2.0.0", "chromadb"),
         ("sentence-transformers", "sentence_transformers"),
     ]
 
     missing = [pkg for pkg, module in deps if not _module_available(module)]
-    if _module_available("chromadb") and not _is_chromadb_compatible():
-        missing.append("chromadb<0.5")
-    if _module_available("chromadb") and not _is_numpy_compatible_for_chromadb():
-        missing.append("numpy<2")
     if not missing:
         print("✅ 关键运行依赖检查通过")
         return True

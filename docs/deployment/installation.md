@@ -38,9 +38,10 @@ lumina init
 
 配置向导会帮你:
 1. 📁 选择输入源目录
-2. 📁 选择输出目录 (Obsidian Vault)
-3. 🤖 自动检测可用的 LLM Provider
-4. ✅ 生成最小可用的 `~/.lumina/lumina.yaml`
+2. 📁 选择输出目录
+3. 🎨 选择输出格式（Obsidian / Notion / Plain Markdown）
+4. 🤖 自动检测可用的 LLM Provider
+5. ✅ 生成最小可用的 `~/.lumina/lumina.yaml`
 
 **自动检测:**
 - 环境变量: `OPENAI_API_KEY`, `DEEPSEEK_API_KEY`, `DASHSCOPE_API_KEY`, `VOLCENGINE_API_KEY`, `MOONSHOT_API_KEY`, `ZHIPU_API_KEY`, `ANTHROPIC_API_KEY`

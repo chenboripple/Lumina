@@ -6,6 +6,11 @@
 
 ## ✨ 核心价值
 
+**Lumina 不是一个笔记管理工具 —— 它是一个「知识处理管道」。**
+
+你的笔记仍然由 [Obsidian](https://obsidian.md)（或其他 Markdown 工具）来管理，Lumina 只做一件事：
+**把你的原始文件（文档、邮件、聊天记录、会议纪要...）转换成结构化的、可链接的知识笔记。**
+
 Lumina 帮你：
 
 - **📁 自动整理**：把散落的文档、笔记、邮件、会议记录转换成结构化的知识笔记
@@ -14,6 +19,8 @@ Lumina 帮你：
 - **🎯 场景感知**：自动识别会议纪要、学术论文、PRD、邮件、聊天记录等
 - **⚡ 增量更新**：只重新处理变化的文件
 - **🌐 Web 界面**：可视化查看进度、搜索、管理知识图谱
+
+> **一句话理解 Lumina**：原始文件 → Lumina（AI 处理管道）→ Obsidian（笔记管理）
 
 ---
 
@@ -98,13 +105,26 @@ Lumina 会自动识别并适配：
 - 🖥️ **运维文档**：整理系统信息、故障处理
 - 📧 **邮件/聊天记录**：提取关键信息、行动项
 
-### 🎨 Obsidian 增强输出
+### 🎨 多格式输出
 
-生成的笔记包含：
-- `frontmatter`: `title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
+Lumina 生成的是纯 Markdown 文件，支持多种笔记工具：
+
+**Obsidian（推荐）**
+- YAML Frontmatter: `title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
 - 场景感知的 `callout`
 - 层级标签：`lumina/scene/meeting_notes`
 - `[[双向链接]]` 自动识别相关文件
+
+**Notion**
+- Properties 表格（Notion 会自动识别）
+- 标准 Markdown 链接
+- 适合直接导入 Notion（选择 Import → Markdown）
+
+**Plain Markdown**
+- 通用 Markdown 格式
+- 可在任何 Markdown 编辑器中使用
+
+通过 `output.plugin` 配置选择输出格式。
 
 ### 🤖 多 LLM Provider 支持
 
@@ -186,6 +206,18 @@ pip install "git+https://github.com/chenboripple/Lumina.git@release-ripple"
 
 ### Harness
 Planner → Executor → Validator → Harness 完整链路
+
+## 许可证
+
+Lumina 采用双重许可证：
+
+- **源代码**：[MIT License](LICENSE) — 允许商用，需保留版权声明
+- **知识库内容**：[CC BY 4.0](LICENSE) — 允许商用和修改，需署名
+
+这意味着你可以：
+- 自由使用、修改、分发 Lumina（商用或个人）
+- 使用 Lumina 处理商业文件并生成知识库
+- 唯一要求：保留版权声明和作者署名
 
 ## 开发与验证
 

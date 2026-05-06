@@ -1,5 +1,23 @@
 # Lumina 使用手册
 
+## 首次配置
+
+### 交互式配置向导
+
+```bash
+lumina init
+```
+
+`lumina init` 会引导你完成：
+1. 选择输入源目录
+2. 选择输出目录
+3. 选择输出格式（Obsidian / Notion / Plain Markdown）
+4. 选择 LLM Provider（自动检测 Ollama 和 API Key 环境变量）
+5. 选择模型
+6. 确认并生成 `~/.lumina/lumina.yaml`
+
+如果已存在配置文件，`lumina init` 会询问是否覆盖。
+
 ## 运行模式
 
 Lumina 有两种主模式：
@@ -154,7 +172,11 @@ Harness 保存结果时会：
 - source 不命中时按标题相似度兜底
 - 命中旧平铺路径时迁移到新结构路径
 
-## Obsidian 输出
+## 输出格式
+
+Lumina 支持三种输出格式，通过 `output.plugin` 配置：
+
+### Obsidian（默认）
 
 当 `output.plugin = obsidian` 时，生成内容会包含：
 
@@ -168,6 +190,19 @@ Harness 保存结果时会：
 - `stable`：分数 >= 0.85
 - `draft`：分数 >= 0.65 且 < 0.85
 - `review`：分数 < 0.65
+
+### Notion
+
+当 `output.plugin = notion` 时，生成 Notion 导入友好的 Markdown：
+
+- Properties 表格（Notion 导入时自动识别为页面属性）
+- 标准 Markdown 链接 `[text](url)`
+- 标签使用反引号包裹
+- 适合直接导入 Notion（Import → Markdown）
+
+### Plain Markdown
+
+当 `output.plugin = plain` 时，生成通用 Markdown，无特定工具依赖，可在任何 Markdown 编辑器中使用。
 
 ## 向量能力
 

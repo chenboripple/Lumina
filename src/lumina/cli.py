@@ -51,7 +51,7 @@ RUNTIME_DEPENDENCIES_BASE = [
 ]
 
 RUNTIME_DEPENDENCIES_VECTOR = [
-    ("chromadb<0.5", "chromadb"),
+    ("chromadb>=1.0.0,<2.0.0", "chromadb"),
     ("sentence-transformers", "sentence_transformers"),
 ]
 
@@ -63,33 +63,6 @@ def _module_available(module_name: str) -> bool:
         return False
 
 
-def _is_chromadb_compatible() -> bool:
-    """当前项目使用旧版 Chroma 客户端配置，需 chromadb<0.5。"""
-    try:
-        version = importlib.metadata.version("chromadb")
-        parts = version.split(".")
-        major = int(parts[0]) if len(parts) > 0 else 0
-        minor = int(parts[1]) if len(parts) > 1 else 0
-        # 0.5+ 与 1.x API 均不兼容当前初始化方式
-        if major >= 1:
-            return False
-        if major == 0 and minor >= 5:
-            return False
-        return True
-    except Exception:
-        return False
-
-
-def _is_numpy_compatible_for_chromadb() -> bool:
-    """chromadb 0.4.x 在本项目路径下需要 numpy<2。"""
-    try:
-        version = importlib.metadata.version("numpy")
-        major = int(version.split(".")[0])
-        return major < 2
-    except Exception:
-        return False
-
-
 def _ensure_runtime_dependencies(enable_vector: bool = False) -> None:
     """运行前检查关键依赖，缺失时自动安装。"""
     deps = list(RUNTIME_DEPENDENCIES_BASE)
@@ -97,14 +70,6 @@ def _ensure_runtime_dependencies(enable_vector: bool = False) -> None:
         deps.extend(RUNTIME_DEPENDENCIES_VECTOR)
 
     missing = [pkg for pkg, module in deps if not _module_available(module)]
-
-    # 版本兼容性检查：chromadb 必须 <0.5
-    if enable_vector and _module_available("chromadb") and not _is_chromadb_compatible():
-        missing.append("chromadb<0.5")
-
-    # 兼容性检查：chromadb 0.4.x 与 numpy 2.x 不兼容
-    if enable_vector and _module_available("chromadb") and not _is_numpy_compatible_for_chromadb():
-        missing.append("numpy<2")
 
     if not missing:
         return
@@ -1064,6 +1029,36 @@ def _select_model(console, provider: str, ollama_models: Optional[List[str]]) ->
         return click.prompt("请输入模型名", default=default_model)
 
 
+def _select_plugin(console) -> str:
+    """让用户选择输出插件"""
+    plugins = [
+        ("obsidian", "Obsidian (推荐，支持双向链接、callout)"),
+        ("notion", "Notion (适合直接导入 Notion)"),
+        ("plain", "Plain Markdown (通用纯 Markdown)"),
+    ]
+
+    if RICH_AVAILABLE:
+        table = Table(show_header=False, box=None, padding=(0, 1))
+        table.add_column("idx", style="cyan", justify="right")
+        table.add_column("plugin")
+        for i, (plugin_name, plugin_label) in enumerate(plugins, start=1):
+            table.add_row(f"[{i}]", plugin_label)
+        console.print(table)
+
+        choice = IntPrompt.ask(
+            "请选择输出插件",
+            default=1,
+            choices=[str(i) for i in range(1, len(plugins) + 1)],
+            show_choices=False,
+        )
+        return plugins[choice - 1][0]
+    else:
+        for i, (plugin_name, plugin_label) in enumerate(plugins, start=1):
+            click.echo(f"  [{i}] {plugin_label}")
+        choice = click.prompt("请选择输出插件", default=1, type=int)
+        return plugins[choice - 1][0]
+
+
 def _ask_api_key(console, provider: str, env_keys: Dict[str, str]) -> str:
     """询问 API Key"""
     if provider in ("ollama", "llamacpp"):
@@ -1103,6 +1098,7 @@ def _ask_api_key(console, provider: str, env_keys: Dict[str, str]) -> str:
 def _build_config_yaml(
     input_dir: str,
     output_dir: str,
+    plugin: str,
     provider: str,
     model: str,
     api_key: str,
@@ -1119,7 +1115,7 @@ def _build_config_yaml(
             "default_recursive": True,
         },
         "output": {
-            "plugin": "obsidian",
+            "plugin": plugin,
             "base_dir": output_dir,
         },
         "llm": {
@@ -1194,9 +1190,9 @@ def init(force):
 
     # 2. 选择输出目录
     if RICH_AVAILABLE:
-        console.print("\n[bold]📁 2. 选择输出目录 (Obsidian Vault)[/bold]")
+        console.print("\n[bold]📁 2. 选择输出目录[/bold]")
     else:
-        click.echo("\n📁 2. 选择输出目录 (Obsidian Vault)")
+        click.echo("\n📁 2. 选择输出目录")
 
     output_candidates = [
         Path.home() / "Lumina" / "Notes",
@@ -1209,7 +1205,14 @@ def init(force):
         default=str(Path.home() / "Lumina" / "Notes"),
     )
 
-    # 3. 检测并选择 Provider
+    # 3. 选择输出插件 (Obsidian / Notion / Plain)
+    if RICH_AVAILABLE:
+        console.print("\n[bold]🎨 3. 选择输出格式[/bold]")
+    else:
+        click.echo("\n🎨 3. 选择输出格式")
+    plugin = _select_plugin(console)
+
+    # 4. 检测并选择 Provider
     if RICH_AVAILABLE:
         console.print("\n[bold]🤖 3. 选择 LLM Provider[/bold]")
         console.print("[dim]检测中...[/dim]")
@@ -1237,25 +1240,26 @@ def init(force):
 
     provider = _select_provider(console, ollama_models, env_keys)
 
-    # 4. 选择模型
+    # 5. 选择模型
     if RICH_AVAILABLE:
-        console.print(f"\n[bold]🤖 4. 选择模型[/bold] (provider: [cyan]{provider}[/cyan])")
+        console.print(f"\n[bold]🤖 5. 选择模型[/bold] (provider: [cyan]{provider}[/cyan])")
     else:
-        click.echo(f"\n🤖 4. 选择模型 (provider: {provider})")
+        click.echo(f"\n🤖 5. 选择模型 (provider: {provider})")
 
     model = _select_model(console, provider, ollama_models)
 
-    # 5. 询问 API Key (Ollama/llamacpp 跳过)
+    # 6. 询问 API Key (Ollama/llamacpp 跳过)
     api_key = _ask_api_key(console, provider, env_keys)
 
-    # 6. 确认并保存
+    # 7. 确认并保存
     if RICH_AVAILABLE:
-        console.print("\n[bold]💾 5. 生成配置[/bold]")
+        console.print("\n[bold]💾 6. 生成配置[/bold]")
         summary = Table(show_header=False, box=None, padding=(0, 1))
         summary.add_column(style="cyan")
         summary.add_column()
         summary.add_row("输入目录", input_dir)
         summary.add_row("输出目录", output_dir)
+        summary.add_row("输出格式", plugin)
         summary.add_row("Provider", provider)
         summary.add_row("Model", model)
         if api_key:
@@ -1266,9 +1270,10 @@ def init(force):
         console.print(f"\n配置文件将保存到: [cyan]{USER_CONFIG_FILE}[/cyan]")
         confirm = Confirm.ask("确认生成？", default=True)
     else:
-        click.echo("\n💾 5. 生成配置")
+        click.echo("\n💾 6. 生成配置")
         click.echo(f"  输入目录: {input_dir}")
         click.echo(f"  输出目录: {output_dir}")
+        click.echo(f"  输出格式: {plugin}")
         click.echo(f"  Provider: {provider}")
         click.echo(f"  Model: {model}")
         click.echo(f"\n配置文件将保存到: {USER_CONFIG_FILE}")
@@ -1278,7 +1283,7 @@ def init(force):
         click.echo("已取消")
         return
 
-    config_dict = _build_config_yaml(input_dir, output_dir, provider, model, api_key)
+    config_dict = _build_config_yaml(input_dir, output_dir, plugin, provider, model, api_key)
 
     # 写入配置文件
     USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)

@@ -7,7 +7,7 @@ name = "lumina"
 version = "0.1.0"
 description = "从本地文件萃取知识，生成结构化笔记的 AI Agent"
 readme = "README.md"
-license = {text = "CC BY-NC 4.0"}
+license = {text = "MIT"}
 authors = [
     {name = "Ripple", email = "chenboripple@gmail.com"}
 ]
