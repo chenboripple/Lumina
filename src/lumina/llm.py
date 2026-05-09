@@ -1,6 +1,11 @@
 """
-Lumina LLM Provider - 可配置的 LLM 集成
+Lumina LLM Provider - 可配置的 LLM 集成（增强版）
 支持 OpenAI、Anthropic、国内 API（DeepSeek、百炼、火山引擎、Kimi、智谱）及本地模型（Ollama/llama.cpp）
+
+增强功能：
+  • Circuit Breaker 保护
+  • EventBus 事件发布
+  • 自定义异常体系
 """
 
 import os
@@ -13,6 +18,17 @@ import requests
 
 
 from .utils.logging import get_logger, timed
+from .circuit_breaker import CircuitBreaker, CircuitBreakerConfig, circuit_break
+from .event_bus import (
+    EventBus, get_global_event_bus,
+    llm_success_event, llm_error_event
+)
+from .exceptions import (
+    LuminaError, LLMError,
+    LLMRateLimitError, LLMTimeoutError, LLMAuthenticationError, LLMAPIError, LLMResponseError,
+    ErrorContext,
+    rate_limit_error, timeout_error, auth_error, api_error
+)
 
 logger = get_logger("lumina.llm")
 
@@ -39,6 +55,8 @@ class LLMConfig:
     timeout: int = 60
     max_retries: int = 3
     retry_delay: float = 1.0
+    enable_circuit_breaker: bool = True  # 是否启用 Circuit Breaker
+    enable_events: bool = True  # 是否发布事件
 
     def __post_init__(self):
         if not self.base_url:
@@ -102,18 +120,41 @@ class LLMConfig:
 
 
 class BaseLLMProvider(ABC):
-    """LLM Provider 抽象基类"""
+    """LLM Provider 抽象基类（增强版）"""
 
-    def __init__(self, config: LLMConfig):
+    def __init__(
+        self,
+        config: LLMConfig,
+        circuit_breaker: CircuitBreaker = None,
+        event_bus: EventBus = None
+    ):
         self.config = config
+        self.event_bus = event_bus or get_global_event_bus()
+        
         # 如果 api_key 为空但有环境变量，尝试从环境变量加载
         if not self.config.api_key and self.config.provider not in ["ollama", "llamacpp"]:
             env_key = self.config._get_env_key_name()
             if env_key and os.environ.get(env_key):
                 self.config.api_key = os.environ.get(env_key)
+        
         errors = config.validate()
         if errors:
             raise ValueError(f"LLM config invalid: {'; '.join(errors)}")
+        
+        # 初始化 Circuit Breaker
+        if config.enable_circuit_breaker:
+            self.circuit_breaker = circuit_breaker or CircuitBreaker(
+                name=f"llm.{config.provider}",
+                config=CircuitBreakerConfig(
+                    failure_threshold=5,
+                    timeout_threshold=3,
+                    rate_limit_threshold=2,
+                    open_timeout_seconds=60.0,
+                    enable_fallback=False  # LLM 调用通常不降级
+                )
+            )
+        else:
+            self.circuit_breaker = None
 
     @abstractmethod
     @timed
@@ -126,8 +167,112 @@ class BaseLLMProvider(ABC):
         """流式完成请求"""
         pass
 
+    def _convert_exception(self, exc: Exception) -> LuminaError:
+        """将通用异常转换为新异常体系"""
+        exc_str = str(exc).lower()
+        
+        if "rate limit" in exc_str or "429" in exc_str:
+            # 提取 retry_after 信息
+            retry_after = 60
+            if hasattr(exc, 'response'):
+                retry_after = exc.response.headers.get('Retry-After', 60)
+            return rate_limit_error(str(exc), retry_after=retry_after)
+        
+        elif "timeout" in exc_str or "timed out" in exc_str:
+            return timeout_error(str(exc), timeout_seconds=self.config.timeout)
+        
+        elif "authentication" in exc_str or "401" in exc_str or "403" in exc_str:
+            return auth_error(str(exc))
+        
+        elif any(code in exc_str for code in ["500", "502", "503", "504"]):
+            status_code = 500
+            if hasattr(exc, 'response'):
+                status_code = exc.response.status_code
+            return api_error(str(exc), status_code=status_code)
+        
+        else:
+            return LLMError(str(exc))
+
+    def _publish_success_event(
+        self,
+        duration: float,
+        tokens_used: int = 0,
+        **extra
+    ):
+        """发布 LLM 成功事件"""
+        if self.config.enable_events and self.event_bus:
+            self.event_bus.publish(
+                llm_success_event(
+                    provider=self.config.provider,
+                    model=self.config.model,
+                    tokens_used=tokens_used,
+                    duration=duration,
+                    **extra
+                )
+            )
+
+    def _publish_error_event(
+        self,
+        error: str,
+        error_type: str,
+        **extra
+    ):
+        """发布 LLM 错误事件"""
+        if self.config.enable_events and self.event_bus:
+            self.event_bus.publish(
+                llm_error_event(
+                    provider=self.config.provider,
+                    model=self.config.model,
+                    error=error,
+                    error_type=error_type,
+                    **extra
+                )
+            )
+
+    def _execute_with_protection(
+        self,
+        func,
+        extract_tokens: callable = None
+    ) -> Any:
+        """带 Circuit Breaker 和事件发布的执行"""
+        start_time = time.time()
+        
+        try:
+            if self.circuit_breaker:
+                result = self.circuit_breaker.execute(func)
+            else:
+                result = func()
+            
+            # 提取 token 数量（如果有回调）
+            tokens = 0
+            if extract_tokens and result:
+                tokens = extract_tokens(result)
+            
+            # 发布成功事件
+            self._publish_success_event(
+                duration=time.time() - start_time,
+                tokens_used=tokens
+            )
+            
+            return result
+            
+        except Exception as e:
+            # 转换异常
+            if isinstance(e, LuminaError):
+                converted = e
+            else:
+                converted = self._convert_exception(e)
+            
+            # 发布错误事件
+            self._publish_error_event(
+                error=str(converted),
+                error_type=type(converted).__name__
+            )
+            
+            raise converted
+
     def _retry_call(self, func, *args, **kwargs):
-        """带重试机制的调用"""
+        """带重试机制的调用（增强异常）"""
         last_error = None
         for attempt in range(self.config.max_retries):
             try:
@@ -140,18 +285,29 @@ class BaseLLMProvider(ABC):
                 )
                 if attempt < self.config.max_retries - 1:
                     time.sleep(self.config.retry_delay * (attempt + 1))
+        
         _log_llm(
             f"provider={self.config.provider} model={self.config.model} exhausted retries: {last_error}",
             level="ERROR"
         )
-        raise RuntimeError(f"LLM call failed after {self.config.max_retries} retries: {last_error}")
+        
+        # 使用新异常体系
+        if isinstance(last_error, LuminaError):
+            raise last_error
+        
+        raise self._convert_exception(last_error)
 
 
 class OpenAICompatibleProvider(BaseLLMProvider):
     """OpenAI 兼容协议 Provider（支持 Ollama、llama.cpp、DeepSeek、百炼、火山引擎、Kimi、智谱 GLM 等）"""
 
-    def __init__(self, config: LLMConfig):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: LLMConfig,
+        circuit_breaker: CircuitBreaker = None,
+        event_bus: EventBus = None
+    ):
+        super().__init__(config, circuit_breaker, event_bus)
         try:
             import openai
             # 确保 base_url 以 /v1 结尾（对于兼容 API）
@@ -169,7 +325,7 @@ class OpenAICompatibleProvider(BaseLLMProvider):
             raise ImportError("OpenAI package not installed. Run: pip install openai")
 
     def complete(self, prompt: str, **kwargs) -> str:
-        """调用 OpenAI 兼容 API"""
+        """调用 OpenAI 兼容 API（带 Circuit Breaker 保护）"""
         def _call():
             response = self.client.chat.completions.create(
                 model=self.config.model,
@@ -178,9 +334,19 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 max_tokens=self.config.max_tokens,
                 **kwargs
             )
-            return response.choices[0].message.content
-
-        return self._retry_call(_call)
+            return response
+        
+        def extract_tokens(response):
+            try:
+                return response.usage.total_tokens if hasattr(response, 'usage') else 0
+            except Exception:
+                return 0
+        
+        response = self._execute_with_protection(
+            lambda: self._retry_call(_call),
+            extract_tokens=extract_tokens
+        )
+        return response.choices[0].message.content
 
     def stream(self, prompt: str, **kwargs) -> Iterator[str]:
         """流式调用 OpenAI 兼容 API"""
@@ -194,11 +360,27 @@ class OpenAICompatibleProvider(BaseLLMProvider):
                 **kwargs
             )
             return response
-
+        
+        # Stream 不经过 Circuit Breaker（因为是迭代器）
         response = self._retry_call(_call)
-        for chunk in response:
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+        
+        start_time = time.time()
+        tokens_used = 0
+        content_chunks = []
+        
+        try:
+            for chunk in response:
+                if chunk.choices and chunk.choices[0].delta.content:
+                    text = chunk.choices[0].delta.content
+                    content_chunks.append(text)
+                    yield text
+                    tokens_used += len(text) // 4  # 粗略估计
+        finally:
+            # 发布事件
+            self._publish_success_event(
+                duration=time.time() - start_time,
+                tokens_used=tokens_used
+            )
 
 
 class OpenAIProvider(OpenAICompatibleProvider):
@@ -244,8 +426,13 @@ class GlmProvider(OpenAICompatibleProvider):
 class AnthropicProvider(BaseLLMProvider):
     """Anthropic 协议 Provider - 使用原生 SDK 以支持真正的流式"""
 
-    def __init__(self, config: LLMConfig):
-        super().__init__(config)
+    def __init__(
+        self,
+        config: LLMConfig,
+        circuit_breaker: CircuitBreaker = None,
+        event_bus: EventBus = None
+    ):
+        super().__init__(config, circuit_breaker, event_bus)
         try:
             import anthropic
             self.client = anthropic.Anthropic(
@@ -262,7 +449,7 @@ class AnthropicProvider(BaseLLMProvider):
                 self.base_url = f"{self.base_url}/v1"
 
     def complete(self, prompt: str, **kwargs) -> str:
-        """调用 Anthropic API"""
+        """调用 Anthropic API（带 Circuit Breaker 保护）"""
         if self.client:
             return self._complete_with_sdk(prompt, **kwargs)
         else:
@@ -283,10 +470,23 @@ class AnthropicProvider(BaseLLMProvider):
                 item.text for item in content if hasattr(item, 'text')
             ).strip()
             if not text:
-                raise ValueError(f"Anthropic response missing text content: {response}")
-            return text
-
-        return self._retry_call(_call)
+                raise LLMResponseError(f"Anthropic response missing text content: {response}")
+            
+            # 返回 tuple (text, usage)
+            usage = response.usage if hasattr(response, 'usage') else None
+            return text, usage
+        
+        def extract_tokens(result):
+            text, usage = result
+            if usage and hasattr(usage, 'total_tokens'):
+                return usage.total_tokens
+            return 0
+        
+        text, _ = self._execute_with_protection(
+            lambda: self._retry_call(_call),
+            extract_tokens=extract_tokens
+        )
+        return text
 
     def _complete_with_requests(self, prompt: str, **kwargs) -> str:
         """使用 requests 完成请求（备用方案）"""
@@ -299,10 +499,12 @@ class AnthropicProvider(BaseLLMProvider):
                 if isinstance(item, dict)
             ).strip()
             if not text:
-                raise ValueError(f"Anthropic response missing text content: {response}")
+                raise LLMResponseError(f"Anthropic response missing text content: {response}")
             return text
-
-        return self._retry_call(_call)
+        
+        return self._execute_with_protection(
+            lambda: self._retry_call(_call)
+        )
 
     def _request(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """使用 requests 进行非流式请求"""
@@ -347,10 +549,22 @@ class AnthropicProvider(BaseLLMProvider):
             )
 
         stream = self._retry_call(_call)
-        for event in stream:
-            if event.type == 'content_block_delta':
-                if hasattr(event.delta, 'text'):
-                    yield event.delta.text
+        
+        start_time = time.time()
+        tokens_used = 0
+        
+        try:
+            for event in stream:
+                if event.type == 'content_block_delta':
+                    if hasattr(event.delta, 'text'):
+                        text = event.delta.text
+                        yield text
+                        tokens_used += len(text) // 4
+        finally:
+            self._publish_success_event(
+                duration=time.time() - start_time,
+                tokens_used=tokens_used
+            )
 
     def _stream_with_requests(self, prompt: str, **kwargs) -> Iterator[str]:
         """使用 requests 进行流式请求（备用方案）"""
@@ -380,22 +594,33 @@ class AnthropicProvider(BaseLLMProvider):
             return response
 
         response = self._retry_call(_call)
-        for line in response.iter_lines(decode_unicode=True):
-            if line.startswith("data: "):
-                data_str = line[6:].strip()
-                if data_str == "[DONE]":
-                    break
-                try:
-                    data = json.loads(data_str)
-                    event_type = data.get("type")
-                    if event_type == "content_block_delta":
-                        delta = data.get("delta", {})
-                        if delta.get("type") == "text_delta":
-                            text = delta.get("text", "")
-                            if text:
-                                yield text
-                except json.JSONDecodeError:
-                    continue
+        
+        start_time = time.time()
+        tokens_used = 0
+        
+        try:
+            for line in response.iter_lines(decode_unicode=True):
+                if line.startswith("data: "):
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(data_str)
+                        event_type = data.get("type")
+                        if event_type == "content_block_delta":
+                            delta = data.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                text = delta.get("text", "")
+                                if text:
+                                    yield text
+                                    tokens_used += len(text) // 4
+                    except json.JSONDecodeError:
+                        continue
+        finally:
+            self._publish_success_event(
+                duration=time.time() - start_time,
+                tokens_used=tokens_used
+            )
 
 
 class LLMProviderFactory:
@@ -419,13 +644,18 @@ class LLMProviderFactory:
         cls._providers[name] = provider_class
 
     @classmethod
-    def create(cls, config: LLMConfig) -> BaseLLMProvider:
+    def create(
+        cls,
+        config: LLMConfig,
+        circuit_breaker: CircuitBreaker = None,
+        event_bus: EventBus = None
+    ) -> BaseLLMProvider:
         """创建 Provider 实例"""
         if config.provider not in cls._providers:
             available = ", ".join(cls._providers.keys())
             raise ValueError(f"Unknown LLM provider: {config.provider}. Available: {available}")
 
-        return cls._providers[config.provider](config)
+        return cls._providers[config.provider](config, circuit_breaker, event_bus)
 
     @classmethod
     def list_providers(cls) -> Dict[str, str]:
@@ -463,7 +693,11 @@ class LLMProviderFactory:
         return defaults.get(provider, "gpt-4")
 
 
-def get_llm_provider(config: Dict[str, Any]) -> BaseLLMProvider:
+def get_llm_provider(
+    config: Dict[str, Any],
+    circuit_breaker: CircuitBreaker = None,
+    event_bus: EventBus = None
+) -> BaseLLMProvider:
     """便捷函数：从配置字典创建 Provider"""
     provider = config.get("provider", "openai")
     # 如果只指定了 provider 但没指定 model，使用该 provider 的默认模型
@@ -481,5 +715,7 @@ def get_llm_provider(config: Dict[str, Any]) -> BaseLLMProvider:
         timeout=config.get("timeout", 60),
         max_retries=config.get("max_retries", 3),
         retry_delay=config.get("retry_delay", 1.0),
+        enable_circuit_breaker=config.get("enable_circuit_breaker", True),
+        enable_events=config.get("enable_events", True),
     )
-    return LLMProviderFactory.create(llm_config)
+    return LLMProviderFactory.create(llm_config, circuit_breaker, event_bus)

@@ -30,6 +30,11 @@ from .plugins import get_plugin
 from .config_core import LuminaConfig, USER_CONFIG_FILE
 from .llm import LLMProviderFactory
 
+# 新功能集成
+from .health_check import get_health_status
+from .event_bus import get_global_event_bus
+from .circuit_breaker import CircuitBreaker
+
 
 class WebInterface:
     """
@@ -171,6 +176,47 @@ class WebInterface:
                 min_similarity = request.args.get('min_similarity', 0.7, type=float)
                 graph = self.harness.build_knowledge_graph(min_similarity)
                 return jsonify(graph)
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+        
+        # API: 健康检查
+        @self.app.route('/health')
+        def api_health():
+            """健康检查端点"""
+            try:
+                return get_health_status()
+            except Exception as e:
+                return jsonify({
+                    "status": "unhealthy",
+                    "error": str(e)
+                }), 503
+        
+        # API: 事件总线状态
+        @self.app.route('/api/events')
+        def api_events():
+            """获取最近事件"""
+            try:
+                event_bus = get_global_event_bus()
+                limit = request.args.get('limit', 50, type=int)
+                event_type = request.args.get('type')
+                
+                recent_events = event_bus.get_recent_events(limit=limit, event_type=event_type)
+                
+                return jsonify({
+                    "events": [event.to_dict() for event in recent_events],
+                    "total": len(recent_events)
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+        
+        # API: 事件总线状态统计
+        @self.app.route('/api/events/status')
+        def api_events_status():
+            """获取事件总线状态"""
+            try:
+                event_bus = get_global_event_bus()
+                status = event_bus.get_status()
+                return jsonify(status)
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
         

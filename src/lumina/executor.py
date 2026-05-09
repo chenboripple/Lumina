@@ -19,6 +19,19 @@ from .core.multimodal_extractor import MultimodalExtractor
 from .scene_detector import SceneDetector, DocumentScene
 from .content_filter import ContentFilter, FilterResult
 
+# 新功能集成
+from .prompt_manager import PromptManager, get_prompt_manager
+from .event_bus import (
+    EventBus, get_global_event_bus,
+    file_processed_event, file_failed_event, note_created_event
+)
+from .exceptions import (
+    LuminaError, LLMError,
+    FileReadError, FileWriteError,
+    ErrorContext,
+    file_read_error
+)
+
 
 @dataclass
 class NoteOutput:
@@ -83,10 +96,16 @@ class Executor:
         history_manager: HistoryManager = None,
         enable_content_filter: bool = True,
         enable_scene_detection: bool = True,
+        prompt_manager: PromptManager = None,
+        event_bus: EventBus = None,
     ):
         self.llm_config = llm_config or {}
         self.cache_manager = cache_manager or CacheManager()
         self.history_manager = history_manager
+        
+        # 初始化新功能组件
+        self.prompt_manager = prompt_manager or get_prompt_manager()
+        self.event_bus = event_bus or get_global_event_bus()
         
         # 初始化场景检测器和内容过滤器
         self.scene_detector = SceneDetector() if enable_scene_detection else None
@@ -979,3 +998,156 @@ Return JSON with this structure:
             "total_tokens": 0,
             "total_cost": 0.0,
         }
+    
+    # ========== 新增集成方法 ==========
+    
+    def _select_prompt_template(self, file_info) -> str:
+        """选择提示词模板（使用新的 FILE_TYPE_TO_PROMPT 映射）"""
+        # 旧代码的 PROMPT_TEMPLATES，保留兼容
+        return getattr(self, "FILE_TYPE_TO_PROMPT", {}).get(file_info.type, "default_extractor")
+    
+    # ========== PromptManager 集成方法 ==========
+    
+    def _build_prompt_with_manager_single(
+        self, file_info, content: str, context: ExecutionContext, template_name: str
+    ) -> str:
+        """使用 PromptManager 构建单块提示词"""
+        guidance = file_info.metadata.get("content_guidance", "")
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        
+        variables = {
+            "filename": file_info.path.name,
+            "file_type": file_info.type,
+            "content": content[:self.CHUNK_SIZE],
+            "guidance": guidance,
+            "brief_summary": brief_summary,
+        }
+        
+        # 尝试使用指定模板，不存在则使用默认
+        if hasattr(self, "prompt_manager") and self.prompt_manager.get(template_name):
+            return self.prompt_manager.render(template_name, **variables)
+        else:
+            # 降级回旧方法
+            return self._build_prompt_single(file_info, content, context)
+    
+    def _build_prompt_with_manager_chunked(
+        self, file_info, chunks: List[str], context: ExecutionContext, template_name: str
+    ) -> str:
+        """使用 PromptManager 构建分块提示词"""
+        guidance = file_info.metadata.get("content_guidance", "")
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        
+        chunks_text = "\n\n".join([
+            f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
+            for i, chunk in enumerate(chunks)
+        ])
+        
+        variables = {
+            "filename": file_info.path.name,
+            "file_type": file_info.type,
+            "content": f"[This is a large document split into {len(chunks)} parts]\n\n{chunks_text}",
+            "num_chunks": len(chunks),
+            "guidance": guidance,
+            "brief_summary": brief_summary,
+        }
+        
+        # 尝试使用指定模板，不存在则使用默认
+        if hasattr(self, "prompt_manager") and self.prompt_manager.get(template_name):
+            return self.prompt_manager.render(template_name, **variables)
+        else:
+            # 降级回旧方法
+            return self._build_prompt_chunked(file_info, chunks, context)
+    
+    def _build_fix_prompt_with_manager(self, context: ExecutionContext) -> str:
+        """使用 PromptManager 构建修复提示词"""
+        current = context.previous_output
+        validation = context.previous_validation
+        
+        issues_text = "\n".join([
+            f"- [{i.severity}] {i.type}: {i.message}"
+            for i in validation.issues
+        ])
+        
+        suggestions_text = "\n".join([
+            f"- {s}"
+            for s in validation.suggestions
+        ])
+        
+        variables = {
+            "current_content": current.content[:2000],
+            "issues": issues_text,
+            "suggestions": suggestions_text,
+        }
+        
+        if hasattr(self, "prompt_manager") and self.prompt_manager.get("quality_validator"):
+            return self.prompt_manager.render("quality_validator", **variables)
+        else:
+            return self._build_fix_prompt(context)
+    
+    # ========== EventBus 集成方法 ==========
+    
+    def _publish_processing_events(
+        self,
+        file_info,
+        note: Optional['NoteOutput'],
+        duration: float,
+        success: bool = True,
+        error: str = None
+    ):
+        """发布处理事件到 EventBus"""
+        if not hasattr(self, "event_bus") or not self.event_bus:
+            return
+        
+        if success and note:
+            # 发布文件处理成功事件
+            self.event_bus.publish(
+                file_processed_event(
+                    file_path=str(file_info.path),
+                    note_path=note.source,
+                    score=note.metadata.get("confidence", 0.0),
+                    success=True,
+                    duration=duration
+                )
+            )
+            
+            # 发布笔记创建事件
+            self.event_bus.publish(
+                note_created_event(
+                    note_path=note.source,
+                    title=note.title,
+                    tags=note.tags,
+                    duration=duration
+                )
+            )
+        else:
+            # 发布文件处理失败事件
+            self.event_bus.publish(
+                file_failed_event(
+                    file_path=str(file_info.path),
+                    error=error or "Unknown error",
+                    error_type="processing_error",
+                    duration=duration
+                )
+            )
+    
+    # ========== 异常体系集成方法 ==========
+    
+    def _read_text_file(self, path: Path) -> List[str]:
+        """基础文本文件读取（使用新异常体系）"""
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 小文件：直接返回
+            if len(content) <= self.CHUNK_SIZE:
+                return [content]
+            
+            # 大文件：智能分块
+            return self._split_content(content)
+            
+        except Exception as e:
+            self._log(f"Text read failed for {path}: {e}", level="error")
+            raise file_read_error(
+                message=f"Failed to read file: {e}",
+                file_path=str(path)
+            ) from e

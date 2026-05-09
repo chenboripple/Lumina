@@ -659,3 +659,20 @@ def stop_worker() -> None:
     """停止后台工作线程（便捷函数）"""
     EventBus.get().stop_worker()
 
+
+# ==================== 全局单例 ====================
+
+_global_event_bus: Optional[EventBus] = None
+_global_lock = threading.Lock()
+
+
+def get_global_event_bus() -> EventBus:
+    """获取全局事件总线实例"""
+    global _global_event_bus
+    if _global_event_bus is None:
+        with _global_lock:
+            if _global_event_bus is None:
+                _global_event_bus = EventBus()
+    return _global_event_bus
+
+
