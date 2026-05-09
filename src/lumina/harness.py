@@ -46,6 +46,8 @@ class HarnessConfig:
     incremental: bool = True  # 是否增量处理
     parallel: bool = True  # 是否并行处理
     max_workers: int = 4  # 并行处理线程数
+    use_async_llm: bool = False  # 是否使用 Async LLM 模块（异步并发）
+    async_max_concurrent: int = 5  # Async LLM 最大并发数
     stream_output: bool = False  # 是否流式输出进度
     enable_history: bool = True  # 是否启用历史记录
     quick_validation_first: bool = True  # 是否先进行快速验证
@@ -562,25 +564,87 @@ class Harness:
     def _process_batches(self, plan) -> List[Dict[str, Any]]:
         """处理所有批次"""
         results = []
-        
+
         for batch_idx, batch in enumerate(plan.batches):
             self._log(f"\n📦 Processing batch {batch_idx + 1}/{len(plan.batches)} "
                      f"({len(batch)} files)")
-            
+
             batch_start = time.time()
-            
-            if self.config.parallel and len(batch) > 1:
-                # 并行处理批次
+
+            if self.config.use_async_llm and len(batch) > 1:
+                # Async LLM 并发处理
+                batch_results = self._process_batch_async(batch, plan)
+            elif self.config.parallel and len(batch) > 1:
+                # 线程池并行处理
                 batch_results = self._process_batch_parallel(batch, plan)
             else:
                 # 串行处理批次
                 batch_results = self._process_batch_serial(batch, plan)
-            
+
             results.extend(batch_results)
-            
+
             batch_duration = time.time() - batch_start
             self._log(f"✅ Batch completed in {batch_duration:.1f}s")
-        
+
+        return results
+
+    def _process_batch_async(self, batch: List[FileInfo], plan) -> List[Dict[str, Any]]:
+        """
+        使用 Async LLM 并发处理批次（高吞吐）
+
+        使用 asyncio 协程 + Semaphore 限制并发，相比 ThreadPoolExecutor
+        减少线程切换开销，适合 I/O 密集的 LLM 调用场景。
+        """
+        import asyncio
+        from .async_llm import AsyncLLMProviderFactory
+
+        results = []
+
+        with self._state_lock:
+            self.state.in_progress_files = len(batch)
+
+        async def process_one(file_info: FileInfo) -> Dict[str, Any]:
+            """包装单个文件处理为协程，确保异常安全"""
+            nonlocal results
+            try:
+                result = self._process_single(file_info, plan)
+                with self._state_lock:
+                    if result.get("processed"):
+                        self.state.processed_files += 1
+                return result
+            except Exception as e:
+                with self._state_lock:
+                    self.state.failed_files += 1
+                    error_msg = f"Failed to process {file_info.path}: {e}"
+                    self.state.errors.append({"file": str(file_info.path), "error": str(e)})
+                self._log(f"❌ {error_msg}", level="error")
+                return {
+                    "file": str(file_info.path),
+                    "processed": False,
+                    "error": str(e),
+                }
+            finally:
+                with self._state_lock:
+                    self.state.in_progress_files = max(0, self.state.in_progress_files - 1)
+
+        async def process_batch_safe():
+            """使用 Semaphore 限制并发"""
+            sem = asyncio.Semaphore(self.config.async_max_concurrent)
+
+            async def process_with_sem(file_info: FileInfo):
+                async with sem:
+                    return await process_one(file_info)
+
+            tasks = [process_with_sem(f) for f in batch]
+            return await asyncio.gather(*tasks)
+
+        try:
+            results = asyncio.run(process_batch_safe())
+        except Exception as e:
+            self._log(f"❌ Async batch failed: {e}", level="error")
+            # 如果 async 模式失败，回退到串行处理
+            results = self._process_batch_serial(batch, plan)
+
         return results
     
     def _process_batch_serial(self, batch: List[FileInfo], plan) -> List[Dict[str, Any]]:

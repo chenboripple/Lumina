@@ -750,26 +750,202 @@ Return JSON with this structure:
     def _call_llm(self, prompt: str, context: ExecutionContext) -> str:
         """调用 LLM（带统计）"""
         self.stats["total_calls"] += 1
-        
+
         try:
             llm = self._get_llm()
             response = llm.complete(prompt)
-            
+
             # 估算 Token 和成本
             estimated_tokens = len(prompt) / 4 + len(response) / 4
             estimated_cost = estimated_tokens * 0.01 / 1000  # GPT-4 价格
-            
+
             self.stats["total_tokens"] += estimated_tokens
             self.stats["total_cost"] += estimated_cost
-            
+
             return response
-            
+
         except Exception as e:
             self._log(
                 f"LLM request failed for {context.file_info.path} round={context.iteration + 1}: {e}",
                 level="error"
             )
             raise
+
+    async def _call_llm_async(self, prompt: str, context: ExecutionContext) -> str:
+        """异步调用 LLM（带统计）
+
+        使用 async_llm 模块的 AsyncLLMProviderFactory，与同步 _call_llm 保持
+        相同的统计与错误日志行为，便于在 Harness 中并发处理多文件。
+        """
+        from .async_llm import AsyncLLMProviderFactory
+
+        self.stats["total_calls"] += 1
+
+        provider = None
+        try:
+            llm_config = LLMConfig(
+                provider=self.llm_config.get("provider", "openai"),
+                base_url=self.llm_config.get("base_url"),
+                api_key=self.llm_config.get("api_key"),
+                model=self.llm_config.get("model", "gpt-4"),
+                temperature=self.llm_config.get("temperature", 0.3),
+                max_tokens=self.llm_config.get("max_tokens", 2000),
+                timeout=self.llm_config.get("timeout", 60),
+                max_retries=self.llm_config.get("max_retries", 3),
+                retry_delay=self.llm_config.get("retry_delay", 1.0),
+            )
+            provider = AsyncLLMProviderFactory.create(llm_config)
+            result = await provider.complete(prompt)
+            response = result.text
+
+            estimated_tokens = result.tokens_used or (len(prompt) / 4 + len(response) / 4)
+            estimated_cost = estimated_tokens * 0.01 / 1000
+            self.stats["total_tokens"] += estimated_tokens
+            self.stats["total_cost"] += estimated_cost
+
+            return response
+
+        except Exception as e:
+            self._log(
+                f"Async LLM request failed for {context.file_info.path} round={context.iteration + 1}: {e}",
+                level="error",
+            )
+            raise
+        finally:
+            if provider is not None:
+                try:
+                    await provider.close()
+                except Exception:
+                    pass
+
+    async def execute_async(self, context: ExecutionContext) -> NoteOutput:
+        """异步执行笔记生成（用于 Harness 异步批处理）
+
+        与 execute() 流程一致，但 LLM 调用使用 async_llm 模块以获得更高
+        的并发吞吐。其它步骤（文件读取、缓存、解析等）当前仍以同步方式
+        在协程中执行。
+        """
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        file_info = context.file_info
+
+        # 1. 同步路径中较重的本地 I/O / CPU 操作放到默认线程池执行
+        content_chunks = await loop.run_in_executor(
+            None, self._read_file_smart, file_info.path
+        )
+        full_content = "\n".join(content_chunks)
+        content_policy_metadata: Dict[str, Any] = {}
+
+        # 2. 内容过滤
+        if self.content_filter:
+            filter_result = self.content_filter.check(file_info.path, full_content)
+            if not filter_result.should_process:
+                self._log(
+                    f"Filtered {file_info.path}: {filter_result.reason}",
+                    level="info",
+                )
+                return NoteOutput(
+                    title=f"[FILTERED] {file_info.path.stem}",
+                    content=f"_Content filtered: {filter_result.reason}_",
+                    tags=["filtered"],
+                    links=[],
+                    source=str(file_info.path),
+                    metadata={
+                        "filtered": True,
+                        "filter_reason": filter_result.reason,
+                        "filter_confidence": filter_result.confidence,
+                    },
+                    processing_info={
+                        "session_id": context.session_id,
+                        "iteration": context.iteration,
+                        "filtered": True,
+                        "timestamp": datetime.now().isoformat(),
+                    },
+                )
+
+            content_policy_metadata = dict(filter_result.metadata or {})
+            sanitized_content, transform_meta = self.content_filter.sanitize_content(
+                full_content, content_policy_metadata,
+            )
+            if sanitized_content != full_content:
+                full_content = sanitized_content
+                content_chunks = (
+                    [full_content]
+                    if len(full_content) <= self.CHUNK_SIZE
+                    else self._split_content(full_content)
+                )
+            content_policy_metadata.update(transform_meta)
+            file_info.metadata["content_policy"] = content_policy_metadata
+
+            guidance = self.content_filter.build_processing_guidance(content_policy_metadata)
+            if guidance:
+                file_info.metadata["content_guidance"] = guidance
+
+        # 3. 场景检测
+        detected_scene = None
+        scene_confidence = 0.0
+        if self.scene_detector:
+            scene_result = self.scene_detector.detect(file_info.path, full_content)
+            detected_scene = scene_result.scene
+            scene_confidence = scene_result.confidence
+
+        # 4. 缓存
+        cache_key = self._generate_cache_key(file_info, content_chunks, detected_scene)
+        cached_result = self._check_cache(cache_key)
+        if cached_result:
+            self.stats["cache_hits"] += 1
+            return cached_result
+        self.stats["cache_misses"] += 1
+
+        # 5/6. 提示词
+        prompt_strategy = self._select_prompt_strategy(file_info)
+        if detected_scene and self.scene_detector:
+            template = self.scene_detector.get_template(detected_scene)
+            if len(content_chunks) == 1:
+                prompt = self._build_scene_prompt(
+                    template, file_info, content_chunks[0], context
+                )
+            else:
+                prompt = self._build_scene_prompt_chunked(
+                    template, file_info, content_chunks, context
+                )
+        else:
+            if len(content_chunks) == 1:
+                prompt = self._build_prompt_single(file_info, content_chunks[0], context)
+            else:
+                prompt = self._build_prompt_chunked(file_info, content_chunks, context)
+
+        # 7. 异步调用 LLM
+        raw_output = await self._call_llm_async(prompt, context)
+
+        # 8. 解析输出
+        if detected_scene and self.scene_detector:
+            template = self.scene_detector.get_template(detected_scene)
+            note = self._parse_scene_output(raw_output, file_info, context, template)
+        else:
+            note = self._parse_output(raw_output, file_info, context)
+
+        if self.content_filter and content_policy_metadata:
+            note = self._apply_content_policy(note, content_policy_metadata)
+
+        # 9. 处理信息
+        note.processing_info = {
+            "session_id": context.session_id,
+            "iteration": context.iteration,
+            "prompt_strategy": prompt_strategy,
+            "detected_scene": detected_scene.value if detected_scene else None,
+            "scene_confidence": scene_confidence,
+            "chunks_processed": len(content_chunks),
+            "cache_key": cache_key,
+            "timestamp": datetime.now().isoformat(),
+            "async": True,
+        }
+
+        # 10. 缓存
+        self._cache_result(cache_key, note)
+
+        return note
     
     def _parse_output(self, raw_output: str, file_info, context: ExecutionContext) -> NoteOutput:
         """解析 LLM 输出"""
