@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  lumina:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lumina
+    restart: unless-stopped
+    ports:
+      - "5088:5088"
+    volumes:
+      # 笔记输出目录
+      - ./data/notes:/data/notes
+      # 缓存目录
+      - ./data/cache:/data/cache
+      # 历史记录
+      - ./data/history:/data/history
+      # 向量存储
+      - ./data/vector_store:/data/vector_store
+      # 配置文件
+      - ./config:/app/config
+      # 输入源（挂载到容器的 /input）
+      - ./input:/input
+    environment:
+      - LUMINA_CONFIG_PATH=/app/config/lumina.yaml
+      - LUMINA_LOG_LEVEL=INFO
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "from lumina.health_check import get_health_status; import json; status = get_health_status(); print(json.dumps(status, indent=2)); exit(0 if status['status'] == 'healthy' else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - lumina-network
+
+  # 可选：ChromaDB 独立服务（用于大规模部署）
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: lumina-chromadb
+    restart: unless-stopped
+    volumes:
+      - ./data/chromadb:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    ports:
+      - "8000:8000"
+    networks:
+      - lumina-network
+    profiles:
+      - chromadb
+
+networks:
+  lumina-network:
+    driver: bridge
