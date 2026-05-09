@@ -4,8 +4,8 @@ This folder contains runnable examples and sample configuration for quick valida
 
 ## Python Demo Scripts
 
-- Incremental processing demo: [demo_incremental.py](../../demo_incremental.py)
-- Quick start script: [quick_start.py](../../quick_start.py)
+- Incremental processing demo: [demo_incremental.py](../../scripts/demo/demo_incremental.py)
+- Quick start script: [quick_start.py](../../scripts/dev/quick_start.py)
 
 ## Sample Config
 
