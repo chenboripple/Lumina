@@ -427,17 +427,21 @@ class Harness:
             if self.config.incremental and self.history:
                 if self.progress_tracker:
                     self.progress_tracker.set_phase("incremental_filter")
-                
+
                 files = self._filter_incremental(files)
                 self.state.changed_files = len(files)
                 self._log(f"⚡ {len(files)} files need processing (incremental mode)")
             else:
                 self.state.changed_files = len(files)
-            
+
             if not files:
                 self.state.in_progress_files = 0
                 self._log("✅ No files need processing, exiting")
                 return self._generate_final_report([])
+
+            # 增量策略决策：变化幅度小的文件只把差异部分发给 LLM，节省 token
+            if self.config.incremental and self.cache and files:
+                self._decide_incremental_strategies(files)
             
             # Phase 1.5: 内容预分析（可选，用于智能过滤和合并）
             content_briefs = None
@@ -540,7 +544,7 @@ class Harness:
     def _filter_incremental(self, files: List[FileInfo]) -> List[FileInfo]:
         """过滤出需要增量处理的文件（基于内容哈希检测）"""
         files_to_process = []
-        
+
         for file_info in files:
             # 使用 FileChangeTracker 检查文件内容是否发生变化
             try:
@@ -556,33 +560,111 @@ class Harness:
                 # 如果检测失败，默认处理该文件
                 self._log(f"⚠️  Failed to check changes for {file_info.path}: {e}, processing anyway", level="warning")
                 files_to_process.append(file_info)
-        
+
         return files_to_process
+
+    def _decide_incremental_strategies(self, files: List[FileInfo]) -> None:
+        """
+        对每个变化文件，决策是用全量还是增量处理。
+        变化 <50% 的文件：把变化块 + 旧内容存入 metadata，走增量 LLM；
+        否则：走全量。
+        """
+        for file_info in files:
+            try:
+                file_path_str = str(file_info.path)
+
+                # 从缓存取上次的内容
+                old_content = self.cache.get_file_content(file_path_str)
+                if not old_content:
+                    # 首次处理，没旧内容，走全量
+                    continue
+
+                # 读当前文件内容
+                try:
+                    new_content = file_info.path.read_text(encoding='utf-8')
+                except (UnicodeDecodeError, IOError):
+                    # 二进制文件或读取失败，跳过增量
+                    continue
+
+                # 计算差异
+                diff_blocks = self.change_tracker.get_file_diff(old_content, new_content)
+
+                # 计算变化比例（新内容中变化行占比）
+                new_total_lines = max(1, len(new_content.splitlines()))
+                changed_lines = sum(
+                    b.end_line - b.start_line + 1
+                    for b in diff_blocks
+                    if b.type in ('added', 'modified')
+                )
+                change_ratio = changed_lines / new_total_lines
+
+                # 变化小于 50% 用增量
+                if change_ratio < 0.5:
+                    # 尝试获取上次生成的笔记，让 LLM 基于旧笔记更新对应部分
+                    old_note = self.cache.get_note_content(file_path_str)
+                    if not old_note:
+                        # 没有旧笔记，无法做"基于旧笔记更新"，退回全量
+                        self._log(
+                            f"📊 Full for {file_info.path.name}: "
+                            f"{change_ratio:.1%} changed but no old note found"
+                        )
+                        continue
+
+                    file_info.metadata["incremental_strategy"] = "incremental"
+                    file_info.metadata["incremental_change_ratio"] = change_ratio
+                    file_info.metadata["incremental_old_content"] = old_content
+                    file_info.metadata["incremental_old_note"] = old_note
+                    # 保存变化块（只保留 changed 类型）
+                    changes_for_prompt = [
+                        {
+                            "type": b.type,
+                            "start_line": b.start_line,
+                            "end_line": b.end_line,
+                            "content": b.content,
+                            "old_content": b.old_content
+                        }
+                        for b in diff_blocks
+                        if b.type != 'unchanged'
+                    ]
+                    file_info.metadata["incremental_changed_blocks"] = changes_for_prompt
+                    self._log(
+                        f"📐 Incremental for {file_info.path.name}: "
+                        f"{change_ratio:.1%} changed, {len(changes_for_prompt)} blocks"
+                    )
+                else:
+                    self._log(
+                        f"📊 Full for {file_info.path.name}: "
+                        f"{change_ratio:.1%} changed (>=50%)"
+                    )
+            except Exception as e:
+                self._log(
+                    f"⚠️  Strategy decision failed for {file_info.path}: {e}, fallback to full",
+                    level="warning")
     
     def _process_batches(self, plan) -> List[Dict[str, Any]]:
         """处理所有批次"""
         results = []
-        
+
         for batch_idx, batch in enumerate(plan.batches):
             self._log(f"\n📦 Processing batch {batch_idx + 1}/{len(plan.batches)} "
                      f"({len(batch)} files)")
-            
+
             batch_start = time.time()
-            
+
             if self.config.parallel and len(batch) > 1:
-                # 并行处理批次
+                # 线程池并行处理
                 batch_results = self._process_batch_parallel(batch, plan)
             else:
                 # 串行处理批次
                 batch_results = self._process_batch_serial(batch, plan)
-            
+
             results.extend(batch_results)
-            
+
             batch_duration = time.time() - batch_start
             self._log(f"✅ Batch completed in {batch_duration:.1f}s")
-        
+
         return results
-    
+
     def _process_batch_serial(self, batch: List[FileInfo], plan) -> List[Dict[str, Any]]:
         """串行处理批次"""
         results = []
@@ -938,6 +1020,23 @@ class Harness:
                     self._log(f"⚠️  Failed to mark file as processed: {e}", level="warning")
                     if self.error_handler:
                         self.error_handler.handle_error(e, severity=ErrorSeverity.WARNING, context="Mark file processed")
+
+                # 保存当前文件内容到缓存，供下次增量分析使用
+                if self.cache and self.config.incremental:
+                    try:
+                        content_for_cache = file_info.path.read_text(encoding='utf-8')
+                        self.cache.set_file_content(file_path_str, content_for_cache)
+                    except (UnicodeDecodeError, IOError):
+                        # 二进制文件等无法以文本形式缓存，安静跳过
+                        pass
+                    except Exception as e:
+                        self._log(f"⚠️  Failed to cache file content: {e}", level="warning")
+
+                    # 保存生成的笔记内容到缓存，供下次增量处理时让 LLM 基于旧笔记更新
+                    try:
+                        self.cache.set_note_content(file_path_str, best_output.content)
+                    except Exception as e:
+                        self._log(f"⚠️  Failed to cache note content: {e}", level="warning")
             else:
                 self._log(f"⚠️  Skipping processed mark for {file_info.path} because no output was generated", level="warning")
             

@@ -228,7 +228,7 @@ class TestLuminaConfig:
     
     def test_default_config(self):
         """测试默认配置"""
-        from lumina.config import LuminaConfig
+        from lumina.config_core import LuminaConfig
         config = LuminaConfig()
         
         assert config.output.plugin == "obsidian"
@@ -237,8 +237,8 @@ class TestLuminaConfig:
     
     def test_load_from_yaml(self, tmp_path):
         """测试从 YAML 加载"""
-        from lumina.config import LuminaConfig
-        
+        from lumina.config_core import LuminaConfig
+
         config_file = tmp_path / "test_config.yaml"
         config_file.write_text("""
 input:
@@ -265,8 +265,8 @@ llm:
     
     def test_validate_missing_path(self, tmp_path):
         """测试验证不存在的路径"""
-        from lumina.config import LuminaConfig, InputSource
-        
+        from lumina.config_core import LuminaConfig, InputSource
+
         config = LuminaConfig(
             input_sources=[InputSource(path="/nonexistent/path")]
         )
@@ -277,8 +277,8 @@ llm:
     
     def test_validate_valid_path(self, tmp_path):
         """测试验证有效路径"""
-        from lumina.config import LuminaConfig, InputSource
-        
+        from lumina.config_core import LuminaConfig, InputSource
+
         config = LuminaConfig(
             input_sources=[InputSource(path=str(tmp_path))]
         )
@@ -288,7 +288,7 @@ llm:
     
     def test_output_path_generation(self):
         """测试输出生成路径"""
-        from lumina.config import OutputConfig
+        from lumina.config_core import OutputConfig
         
         output = OutputConfig(
             base_dir="~/Test",
@@ -302,7 +302,7 @@ llm:
     
     def test_save_and_load_user_config(self, tmp_path):
         """测试保存和加载用户配置"""
-        from lumina.config import LuminaConfig
+        from lumina.config_core import LuminaConfig
         import os
         
         # 临时修改用户配置目录

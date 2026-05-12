@@ -30,6 +30,11 @@ from .plugins import get_plugin
 from .config_core import LuminaConfig, USER_CONFIG_FILE
 from .llm import LLMProviderFactory
 
+# 新功能集成
+from .health_check import get_health_status
+from .event_bus import get_global_event_bus
+from .circuit_breaker import CircuitBreaker
+
 
 class WebInterface:
     """
@@ -174,6 +179,95 @@ class WebInterface:
             except Exception as e:
                 return jsonify({"error": str(e)}), 500
         
+        # API: 健康检查
+        @self.app.route('/health')
+        def api_health():
+            """健康检查端点"""
+            try:
+                return get_health_status()
+            except Exception as e:
+                return jsonify({
+                    "status": "unhealthy",
+                    "error": str(e)
+                }), 503
+        
+        # API: 事件总线状态
+        @self.app.route('/api/events')
+        def api_events():
+            """获取最近事件"""
+            try:
+                event_bus = get_global_event_bus()
+                limit = request.args.get('limit', 50, type=int)
+                event_type = request.args.get('type')
+                
+                recent_events = event_bus.get_recent_events(limit=limit, event_type=event_type)
+                
+                return jsonify({
+                    "events": [event.to_dict() for event in recent_events],
+                    "total": len(recent_events)
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+        
+        # API: 事件总线状态统计
+        @self.app.route('/api/events/status')
+        def api_events_status():
+            """获取事件总线状态"""
+            try:
+                event_bus = get_global_event_bus()
+                status = event_bus.get_status()
+                return jsonify(status)
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 熔断器列表
+        @self.app.route('/api/circuit-breaker')
+        def api_circuit_breaker_list():
+            """获取所有熔断器状态"""
+            try:
+                breakers = CircuitBreaker.list_all()
+                summary = {
+                    "total": len(breakers),
+                    "open": sum(1 for cb in breakers.values() if cb["state"] == "open"),
+                    "half_open": sum(1 for cb in breakers.values() if cb["state"] == "half_open"),
+                    "closed": sum(1 for cb in breakers.values() if cb["state"] == "closed"),
+                }
+                return jsonify({
+                    "summary": summary,
+                    "circuit_breakers": breakers,
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 单个熔断器详情
+        @self.app.route('/api/circuit-breaker/<path:name>')
+        def api_circuit_breaker_detail(name):
+            """获取指定熔断器的详细状态"""
+            try:
+                cb = CircuitBreaker.get(name)
+                if cb is None:
+                    return jsonify({"error": f"Circuit breaker '{name}' not found"}), 404
+                return jsonify(cb.get_status())
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 重置熔断器
+        @self.app.route('/api/circuit-breaker/<path:name>/reset', methods=['POST'])
+        def api_circuit_breaker_reset(name):
+            """重置指定熔断器到 CLOSED 状态"""
+            try:
+                cb = CircuitBreaker.get(name)
+                if cb is None:
+                    return jsonify({"error": f"Circuit breaker '{name}' not found"}), 404
+                cb.reset()
+                return jsonify({
+                    "success": True,
+                    "message": f"Circuit breaker '{name}' has been reset",
+                    "status": cb.get_status(),
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
         # API: 笔记列表
         @self.app.route('/api/notes')
         def api_notes():

@@ -1,3 +1,4 @@
+
 """
 Lumina Configuration Manager
 处理配置加载、验证和优先级
@@ -145,7 +146,7 @@ class LuminaConfig:
     llm_validator: Optional[Dict[str, Any]] = None  # Validator 专用配置
 
     @classmethod
-    def load(cls, config_path: Optional[str] = None) -> "LuminaConfig":
+    def load(cls, config_path: Optional[str] = None, raise_errors: bool = False) -> "LuminaConfig":
         """
         加载配置（按优先级合并）
 
@@ -156,11 +157,24 @@ class LuminaConfig:
 
         Args:
             config_path: 指定用户配置文件路径（可选，覆盖默认路径）
+            raise_errors: 是否在解析错误时抛出异常（False 时使用默认值）
 
         Returns:
             合并后的配置
+
+        Raises:
+            ConfigValidationError: 当 raise_errors=True 且配置存在问题时
         """
-        import yaml
+        # 导入放在这里避免循环导入
+        from .exceptions import ConfigValidationError
+
+        try:
+            import yaml
+        except ImportError:
+            if raise_errors:
+                raise ConfigValidationError("PyYAML is required for config loading")
+            # 如果没有 yaml，返回默认配置
+            return cls()
 
         # 收集配置
         user_config = {}
@@ -170,16 +184,58 @@ class LuminaConfig:
 
         # 2. 首次使用时自动创建空白用户配置文件
         if not config_path and not target_config_file.exists():
-            target_config_file.parent.mkdir(parents=True, exist_ok=True)
-            target_config_file.write_text("", encoding="utf-8")
+            try:
+                target_config_file.parent.mkdir(parents=True, exist_ok=True)
+                target_config_file.write_text("", encoding="utf-8")
+            except Exception as e:
+                if raise_errors:
+                    raise ConfigValidationError(f"Failed to create config directory: {e}")
 
         # 3. 加载用户配置
         if target_config_file.exists():
-            with open(target_config_file, 'r') as f:
-                user_config = yaml.safe_load(f) or {}
+            try:
+                with open(target_config_file, 'r', encoding='utf-8') as f:
+                    user_config = yaml.safe_load(f) or {}
+            except yaml.YAMLError as e:
+                error_msg = (
+                    f"配置文件格式错误: {target_config_file}\n"
+                    f"错误: {e}\n"
+                    f"请检查 YAML 语法是否正确（缩进、冒号等）"
+                )
+                if raise_errors:
+                    raise ConfigValidationError(error_msg)
+                from .utils.logging import get_logger
+                logger = get_logger("lumina.config")
+                logger.warning(f"⚠️  {error_msg}，使用默认配置")
+                user_config = {}
+            except PermissionError as e:
+                error_msg = f"无权限读取配置文件: {target_config_file}"
+                if raise_errors:
+                    raise ConfigValidationError(error_msg)
+                from .utils.logging import get_logger
+                logger = get_logger("lumina.config")
+                logger.warning(f"⚠️  {error_msg}，使用默认配置")
+                user_config = {}
+            except Exception as e:
+                error_msg = f"读取配置文件失败: {e}"
+                if raise_errors:
+                    raise ConfigValidationError(error_msg)
+                from .utils.logging import get_logger
+                logger = get_logger("lumina.config")
+                logger.warning(f"⚠️  {error_msg}，使用默认配置")
+                user_config = {}
 
         # 4. 用用户配置覆盖默认值创建配置
-        return cls._from_dict(user_config)
+        try:
+            return cls._from_dict(user_config)
+        except Exception as e:
+            error_msg = f"配置解析失败: {e}"
+            if raise_errors:
+                raise ConfigValidationError(error_msg)
+            from .utils.logging import get_logger
+            logger = get_logger("lumina.config")
+            logger.warning(f"⚠️  {error_msg}，使用默认配置")
+            return cls()
 
     @classmethod
     def _from_dict(cls, data: Dict[str, Any]) -> "LuminaConfig":
@@ -188,36 +244,43 @@ class LuminaConfig:
 
         # 解析输入源
         sources = []
-        for source in input_data.get("sources", []):
-            sources.append(InputSource(
-                path=source["path"],
-                recursive=source.get("recursive", True),
-                filter=source.get("filter")
-            ))
+        if isinstance(input_data, dict) and input_data.get("sources"):
+            for i, source in enumerate(input_data.get("sources", [])):
+                if isinstance(source, dict):
+                    if "path" not in source:
+                        from .utils.logging import get_logger
+                        logger = get_logger("lumina.config")
+                        logger.warning(f"⚠️  第 {i+1} 个输入源缺少 'path' 字段，已跳过")
+                        continue
+                    sources.append(InputSource(
+                        path=str(source["path"]),
+                        recursive=bool(source.get("recursive", True)),
+                        filter=source.get("filter")
+                    ))
 
         # 输出配置
-        output_data = data.get("output", {})
+        output_data = data.get("output", {}) if isinstance(data.get("output"), dict) else {}
         output_config = OutputConfig(
-            plugin=output_data.get("plugin", "obsidian"),
-            base_dir=output_data.get("base_dir", "~/Lumina/Notes"),
-            vault_path=output_data.get("vault_path"),
-            structure=output_data.get("structure", {}),
-            naming=output_data.get("naming", {}),
-            note_organization=output_data.get("note_organization", {}),
+            plugin=output_data.get("plugin", "obsidian") if isinstance(output_data.get("plugin"), str) else "obsidian",
+            base_dir=output_data.get("base_dir", "~/Lumina/Notes") if isinstance(output_data.get("base_dir"), str) else "~/Lumina/Notes",
+            vault_path=output_data.get("vault_path") if isinstance(output_data.get("vault_path"), (str, type(None))) else None,
+            structure=output_data.get("structure", {}) if isinstance(output_data.get("structure"), dict) else {},
+            naming=output_data.get("naming", {}) if isinstance(output_data.get("naming"), dict) else {},
+            note_organization=output_data.get("note_organization", {}) if isinstance(output_data.get("note_organization"), dict) else {},
         )
 
         # 解析 LLM 配置（使用 llm.py 中的 LLMConfig）
-        llm_data = data.get("llm", {})
+        llm_data = data.get("llm", {}) if isinstance(data.get("llm"), dict) else {}
         llm_config = LLMProviderConfig(
-            provider=llm_data.get("provider", "openai"),
+            provider=llm_data.get("provider", "openai") if isinstance(llm_data.get("provider"), str) else "openai",
             base_url=llm_data.get("base_url"),
             api_key=llm_data.get("api_key"),
-            model=llm_data.get("model", "gpt-4"),
-            temperature=llm_data.get("temperature", 0.3),
-            max_tokens=llm_data.get("max_tokens", 2000),
-            timeout=llm_data.get("timeout", 60),
-            max_retries=llm_data.get("max_retries", 3),
-            retry_delay=llm_data.get("retry_delay", 1.0),
+            model=llm_data.get("model", "gpt-4") if isinstance(llm_data.get("model"), str) else "gpt-4",
+            temperature=float(llm_data.get("temperature", 0.3)) if llm_data.get("temperature") is not None else 0.3,
+            max_tokens=int(llm_data.get("max_tokens", 2000)) if llm_data.get("max_tokens") is not None else 2000,
+            timeout=int(llm_data.get("timeout", 60)) if llm_data.get("timeout") is not None else 60,
+            max_retries=int(llm_data.get("max_retries", 3)) if llm_data.get("max_retries") is not None else 3,
+            retry_delay=float(llm_data.get("retry_delay", 1.0)) if llm_data.get("retry_delay") is not None else 1.0,
         )
 
         # 解析各 Agent 的 LLM 配置
@@ -225,15 +288,27 @@ class LuminaConfig:
         executor_llm_data = data.get("llm_executor")
         validator_llm_data = data.get("llm_validator")
 
+        # 解析 service 配置
         service_data = {"log_retention_days": 15}
-        service_data.update(data.get("service", {}))
+        service_config = data.get("service", {}) if isinstance(data.get("service"), dict) else {}
+        service_data.update(service_config)
+
+        # 解析 harness 配置
+        harness_data = {"max_iterations": 3, "quality_threshold": 0.8}
+        harness_config = data.get("harness", {}) if isinstance(data.get("harness"), dict) else {}
+        harness_data.update(harness_config)
+
+        # 解析 supported_extensions
+        supported_exts = input_data.get("supported_extensions", DEFAULT_SUPPORTED_EXTENSIONS.copy())
+        if not isinstance(supported_exts, list):
+            supported_exts = DEFAULT_SUPPORTED_EXTENSIONS.copy()
 
         return cls(
             input_sources=sources,
-            default_recursive=input_data.get("default_recursive", True),
-            supported_extensions=input_data.get("supported_extensions", DEFAULT_SUPPORTED_EXTENSIONS.copy()),
+            default_recursive=bool(input_data.get("default_recursive", True)),
+            supported_extensions=supported_exts,
             output=output_config,
-            harness=data.get("harness", {}),
+            harness=harness_data,
             service=service_data,
             llm=llm_config,
             llm_planner=planner_llm_data,
@@ -241,75 +316,127 @@ class LuminaConfig:
             llm_validator=validator_llm_data,
         )
 
-    def validate(self) -> List[str]:
-        """验证配置有效性"""
+    def validate(self, raise_errors: bool = False) -> List[str]:
+        """
+        验证配置有效性
+
+        Args:
+            raise_errors: 是否在验证失败时抛出异常
+
+        Returns:
+            错误信息列表（空列表表示验证通过）
+
+        Raises:
+            ConfigValidationError: 当 raise_errors=True 且配置存在问题时
+        """
         errors = []
 
         # 验证输入源
         for i, source in enumerate(self.input_sources):
             path = source.resolve_path()
             if not path.exists():
-                errors.append(f"Input source {i+1} does not exist: {path}")
+                errors.append(f"输入源 {i+1} 不存在: {path}")
+            elif not path.is_dir() and not path.is_file():
+                errors.append(f"输入源 {i+1} 不是有效的文件或目录: {path}")
 
         # 验证输出目录
         output_base = self.output.resolve_base_dir()
         try:
             output_base.mkdir(parents=True, exist_ok=True)
         except PermissionError:
-            errors.append(f"Cannot create output directory: {output_base}")
+            errors.append(f"无权限创建输出目录: {output_base}")
+        except Exception as e:
+            errors.append(f"输出目录配置错误: {e}")
 
         # 验证 Vault 路径
         if self.output.vault_path:
             vault = self.output.resolve_vault_path()
             if vault and not vault.exists():
-                errors.append(f"Vault path does not exist: {vault}")
+                errors.append(f"Vault 路径不存在: {vault}")
 
         # 验证 LLM 配置
-        llm_errors = self.llm.validate()
-        errors.extend(llm_errors)
+        try:
+            llm_errors = self.llm.validate()
+            errors.extend(llm_errors)
+        except Exception as e:
+            errors.append(f"LLM 配置验证失败: {e}")
+
+        # 验证 harness 配置
+        max_iterations = self.harness.get("max_iterations", 3)
+        if not isinstance(max_iterations, int) or max_iterations < 1 or max_iterations > 10:
+            errors.append(f"max_iterations 必须在 1-10 之间（当前值: {max_iterations}）")
+
+        quality_threshold = self.harness.get("quality_threshold", 0.8)
+        if not isinstance(quality_threshold, (int, float)) or quality_threshold < 0 or quality_threshold > 1:
+            errors.append(f"quality_threshold 必须在 0-1 之间（当前值: {quality_threshold}）")
+
+        # 验证 service 配置
+        log_retention = self.service.get("log_retention_days", 15)
+        if not isinstance(log_retention, int) or log_retention < 0:
+            errors.append(f"log_retention_days 必须是非负整数（当前值: {log_retention}）")
+
+        # 如果需要抛出异常
+        if raise_errors and errors:
+            from .exceptions import ConfigValidationError
+            error_msg = "配置验证失败:\n" + "\n".join(f"  - {e}" for e in errors)
+            raise ConfigValidationError(error_msg)
 
         return errors
 
-    def save_user_config(self):
-        """保存当前配置到 ~/.lumina/lumina.yaml"""
+    def save_user_config(self, target_path: Optional[Path] = None) -> None:
+        """
+        保存当前配置到用户配置文件
+
+        Args:
+            target_path: 目标路径（可选，默认使用 ~/.lumina/lumina.yaml）
+
+        Raises:
+            ConfigValidationError: 当保存失败时
+        """
         import yaml
+        target_file = target_path or USER_CONFIG_FILE
 
-        config_dict = {
-            "input": {
-                "sources": [
-                    {
-                        "path": s.path,
-                        "recursive": s.recursive,
-                        "filter": s.filter,
-                    }
-                    for s in self.input_sources
-                ],
-                "default_recursive": self.default_recursive,
-                "supported_extensions": self.supported_extensions,
-            },
-            "output": {
-                "plugin": self.output.plugin,
-                "base_dir": self.output.base_dir,
-                "vault_path": self.output.vault_path,
-                "structure": self.output.structure,
-                "note_organization": self.output.note_organization,
-                "naming": self.output.naming,
-            },
-            "llm": {
-                "provider": self.llm.provider,
-                "base_url": self.llm.base_url,
-                "api_key": self.llm.api_key,
-                "model": self.llm.model,
-                "temperature": self.llm.temperature,
-                "max_tokens": self.llm.max_tokens,
-                "timeout": self.llm.timeout,
-                "max_retries": self.llm.max_retries,
-                "retry_delay": self.llm.retry_delay,
-            },
-            "harness": self.harness,
-            "service": self.service,
-        }
+        try:
+            config_dict = {
+                "input": {
+                    "sources": [
+                        {
+                            "path": s.path,
+                            "recursive": s.recursive,
+                            "filter": s.filter,
+                        }
+                        for s in self.input_sources
+                    ],
+                    "default_recursive": self.default_recursive,
+                    "supported_extensions": self.supported_extensions,
+                },
+                "output": {
+                    "plugin": self.output.plugin,
+                    "base_dir": self.output.base_dir,
+                    "vault_path": self.output.vault_path,
+                    "structure": self.output.structure,
+                    "note_organization": self.output.note_organization,
+                    "naming": self.output.naming,
+                },
+                "llm": {
+                    "provider": self.llm.provider,
+                    "base_url": self.llm.base_url,
+                    "api_key": self.llm.api_key,
+                    "model": self.llm.model,
+                    "temperature": self.llm.temperature,
+                    "max_tokens": self.llm.max_tokens,
+                    "timeout": self.llm.timeout,
+                    "max_retries": self.llm.max_retries,
+                    "retry_delay": self.llm.retry_delay,
+                },
+                "harness": self.harness,
+                "service": self.service,
+            }
 
-        USER_CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(USER_CONFIG_FILE, 'w') as f:
-            yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)
+            target_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(target_file, 'w', encoding='utf-8') as f:
+                yaml.dump(config_dict, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            from .exceptions import ConfigValidationError
+            raise ConfigValidationError(f"保存配置失败: {e}")
+

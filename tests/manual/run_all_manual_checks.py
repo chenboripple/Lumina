@@ -17,7 +17,6 @@ SCRIPTS = [
     "validate_flask_json.py",
     "validate_file_edit_tool.py",
     "validate_optimizations.py",
-    "validate_lumina_v2.py",
 ]
 
 

@@ -367,7 +367,7 @@ def status():
 @click.option('--recursive', '-r', is_flag=True, default=None, help='递归扫描')
 @click.option('--output', '-o', default=None, help='输出目录')
 @click.option('--threshold', '-t', default=None, type=float, help='质量阈值')
-@click.option('--incremental/--no-incremental', default=True, help='增量处理')
+@click.option('--incremental/--no-incremental', default=True, help='启用增量处理（自动跳过未变文件；对小幅修改只把差异部分发送给 LLM）')
 @click.option('--parallel/--no-parallel', default=True, help='并行处理')
 @click.option('--vector/--no-vector', default=True, help='启用向量数据库')
 @click.option('--planner-llm', default=None, help='Planner 的 LLM 配置 (JSON)')

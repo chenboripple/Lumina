@@ -19,6 +19,19 @@ from .core.multimodal_extractor import MultimodalExtractor
 from .scene_detector import SceneDetector, DocumentScene
 from .content_filter import ContentFilter, FilterResult
 
+# 新功能集成
+from .prompt_manager import PromptManager, get_prompt_manager
+from .event_bus import (
+    EventBus, get_global_event_bus,
+    file_processed_event, file_failed_event, note_created_event
+)
+from .exceptions import (
+    LuminaError, LLMError,
+    FileReadError, FileWriteError,
+    ErrorContext,
+    file_read_error
+)
+
 
 @dataclass
 class NoteOutput:
@@ -83,10 +96,16 @@ class Executor:
         history_manager: HistoryManager = None,
         enable_content_filter: bool = True,
         enable_scene_detection: bool = True,
+        prompt_manager: PromptManager = None,
+        event_bus: EventBus = None,
     ):
         self.llm_config = llm_config or {}
         self.cache_manager = cache_manager or CacheManager()
         self.history_manager = history_manager
+        
+        # 初始化新功能组件
+        self.prompt_manager = prompt_manager or get_prompt_manager()
+        self.event_bus = event_bus or get_global_event_bus()
         
         # 初始化场景检测器和内容过滤器
         self.scene_detector = SceneDetector() if enable_scene_detection else None
@@ -202,9 +221,16 @@ class Executor:
         
         # 5. 选择提示词策略
         prompt_strategy = self._select_prompt_strategy(file_info)
-        
-        # 6. 构建提示词（使用场景模板或默认模板）
-        if detected_scene and self.scene_detector:
+
+        # 6. 构建提示词（优先使用增量模式，其次场景模板，最后默认模板）
+        incremental_strategy = file_info.metadata.get("incremental_strategy") == "incremental"
+        changed_blocks = file_info.metadata.get("incremental_changed_blocks")
+
+        if incremental_strategy and changed_blocks:
+            # 增量模式：仅发送变化部分给 LLM 以节省 token
+            prompt = self._build_prompt_incremental(file_info, changed_blocks, context)
+            prompt_strategy = "incremental"
+        elif detected_scene and self.scene_detector:
             # 使用场景化提示词
             template = self.scene_detector.get_template(detected_scene)
             if len(content_chunks) == 1:
@@ -246,49 +272,14 @@ class Executor:
             "cache_key": cache_key,
             "timestamp": datetime.now().isoformat(),
         }
+        if prompt_strategy == "incremental":
+            note.processing_info["incremental_change_ratio"] = file_info.metadata.get("incremental_change_ratio")
         
         # 10. 缓存结果
         self._cache_result(cache_key, note)
         
         return note
-    
-    def execute_with_stream(self, context: ExecutionContext) -> Iterator[str]:
-        """
-        流式执行笔记生成（实时展示进度）
-        
-        Yields:
-            处理进度信息
-        """
-        file_info = context.file_info
-        
-        yield f"📖 读取文件: {file_info.path.name}..."
-        content_chunks = self._read_file_smart(file_info.path)
-        yield f"✅ 读取完成，共 {len(content_chunks)} 个分块"
-        
-        yield "🧠 构建提示词..."
-        if len(content_chunks) == 1:
-            prompt = self._build_prompt_single(file_info, content_chunks[0], context)
-        else:
-            prompt = self._build_prompt_chunked(file_info, content_chunks, context)
-        
-        yield "🤖 调用 LLM..."
-        
-        # 流式调用
-        llm = self._get_llm()
-        full_response = []
-        for chunk in llm.stream(prompt):
-            full_response.append(chunk)
-            yield chunk  # 实时输出 LLM 生成的内容
-        
-        raw_output = "".join(full_response)
-        
-        yield "📝 解析输出..."
-        note = self._parse_output(raw_output, file_info, context)
-        
-        yield f"✅ 完成: {note.title}"
-        
-        return note
-    
+
     def revise(self, context: ExecutionContext) -> NoteOutput:
         """
         基于验证反馈修复笔记
@@ -342,38 +333,7 @@ class Executor:
             # 出错时回退到基本读取
             self._log(f"Multimodal extraction failed for {path}: {e}", level="warning")
             return self._read_text_file(path)
-    
-    def _read_text_file(self, path: Path) -> List[str]:
-        """基础文本文件读取"""
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # 小文件：直接返回
-            if len(content) <= self.CHUNK_SIZE:
-                return [content]
-            
-            # 大文件：智能分块
-            return self._split_content(content)
-            
-        except Exception as e:
-            self._log(f"Text read failed for {path}: {e}", level="error")
-            return [f"[Error reading file: {e}]"]
-    
-    def _read_image(self, path: Path) -> str:
-        """读取图片（已迁移到 MultimodalExtractor）"""
-        # 保留此方法以兼容旧代码，实际逻辑在 MultimodalExtractor 中
-        extractor = MultimodalExtractor()
-        extracted = extractor.extract(path)
-        return extracted.text
-    
-    def _read_pdf(self, path: Path) -> List[str]:
-        """读取 PDF（已迁移到 MultimodalExtractor）"""
-        # 保留此方法以兼容旧代码，实际逻辑在 MultimodalExtractor 中
-        extractor = MultimodalExtractor()
-        extracted = extractor.extract(path)
-        return [extracted.text]
-    
+
     def _split_content(self, content: str) -> List[str]:
         """智能分块内容"""
         chunks = []
@@ -671,7 +631,85 @@ Return JSON with this structure:
     }}
 }}
 """
-    
+
+    def _build_prompt_incremental(self, file_info, changed_blocks: List[Dict[str, Any]], context: ExecutionContext) -> str:
+        """构建增量提示词：基于旧笔记，只更新对应于变化部分的笔记内容，保持其他部分不变"""
+        guidance = file_info.metadata.get("content_guidance", "")
+        guidance_block = f"6. {guidance}\n" if guidance else ""
+
+        # 检查是否有预分析的简述信息
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        brief_injection = ""
+        if brief_summary:
+            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
+
+        # 拼接变化的内容
+        changes_text = []
+        for i, block in enumerate(changed_blocks, 1):
+            block_type = block.get("type", "modified")
+            content = block.get("content", "")
+            old_content = block.get("old_content", "")
+            if block_type == "removed":
+                changes_text.append(f"### [REMOVED] Section {i} (lines {block['start_line']}-{block['end_line']})\n```\n{content}\n```")
+            elif block_type == "added":
+                changes_text.append(f"### [ADDED] Section {i} (lines {block['start_line']}-{block['end_line']})\n```\n{content}\n```")
+            elif block_type == "modified":
+                changes_text.append(
+                    f"### [MODIFIED] Section {i} (lines {block['start_line']}-{block['end_line']})\n"
+                    f"OLD:\n```\n{old_content}\n```\n"
+                    f"NEW:\n```\n{content}\n```"
+                )
+
+        change_ratio = file_info.metadata.get("incremental_change_ratio", 0.0)
+        old_note = file_info.metadata.get("incremental_old_note", "")
+
+        return f"""You are a knowledge extraction expert. A previously-processed source file was modified. Your task is to UPDATE the existing knowledge note to reflect only the changes, while keeping all other parts of the note intact.
+
+## Source Information
+- File: {file_info.path.name}
+- Type: {file_info.type}
+- Mode: incremental update
+- Change ratio: {change_ratio:.1%}
+{brief_injection}
+## Changed Sections of Source File
+{chr(10).join(changes_text)}
+
+## Previous Note (keep this structure, only update relevant parts)
+```
+{old_note}
+```
+
+## Instructions
+Generate an updated knowledge note based on the previous note and the changed sections of the source file:
+
+1. Keep the note structure, tone, and most content exactly the same as the previous note
+2. Only update sections related to the source file changes
+3. If sections were removed from the source, remove corresponding parts from the note
+4. If sections were added, add new corresponding parts to the note
+5. If sections were modified, update the corresponding parts of the note
+6. Ensure the updated note remains coherent and comprehensive
+{guidance_block}
+
+## Output Format
+Return JSON with this structure (keep the same structure, just update the content):
+{{
+    "title": "Updated topical title (keep the same if changes don't affect the topic)",
+    "summary": "Updated 2-4 sentence overview reflecting the changes",
+    "key_points": ["concrete takeaway 1", "concrete takeaway 2 (keep most points unchanged)"],
+    "supporting_details": ["important detail 1 (keep most details unchanged)"],
+    "action_items": ["follow-up if any (update only if changes affect actions)"],
+    "open_questions": ["unresolved question if any (update only if changes affect questions)"],
+    "tags": ["tag1", "tag2 (keep most tags unchanged)"],
+    "suggested_links": ["Topic A", "Topic B (keep most links unchanged)"],
+    "metadata": {{
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.9,
+        "update_mode": "incremental",
+        "change_ratio": {change_ratio}
+    }}
+}}
+"""
+
     def _build_fix_prompt(self, context: ExecutionContext) -> str:
         """构建修复提示词"""
         current = context.previous_output
@@ -731,27 +769,27 @@ Return JSON with this structure:
     def _call_llm(self, prompt: str, context: ExecutionContext) -> str:
         """调用 LLM（带统计）"""
         self.stats["total_calls"] += 1
-        
+
         try:
             llm = self._get_llm()
             response = llm.complete(prompt)
-            
+
             # 估算 Token 和成本
             estimated_tokens = len(prompt) / 4 + len(response) / 4
             estimated_cost = estimated_tokens * 0.01 / 1000  # GPT-4 价格
-            
+
             self.stats["total_tokens"] += estimated_tokens
             self.stats["total_cost"] += estimated_cost
-            
+
             return response
-            
+
         except Exception as e:
             self._log(
                 f"LLM request failed for {context.file_info.path} round={context.iteration + 1}: {e}",
                 level="error"
             )
             raise
-    
+
     def _parse_output(self, raw_output: str, file_info, context: ExecutionContext) -> NoteOutput:
         """解析 LLM 输出"""
         try:
@@ -979,3 +1017,23 @@ Return JSON with this structure:
             "total_tokens": 0,
             "total_cost": 0.0,
         }
+
+    def _read_text_file(self, path: Path) -> List[str]:
+        """基础文本文件读取（使用新异常体系）"""
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                content = f.read()
+            
+            # 小文件：直接返回
+            if len(content) <= self.CHUNK_SIZE:
+                return [content]
+            
+            # 大文件：智能分块
+            return self._split_content(content)
+            
+        except Exception as e:
+            self._log(f"Text read failed for {path}: {e}", level="error")
+            raise file_read_error(
+                message=f"Failed to read file: {e}",
+                file_path=str(path)
+            ) from e
