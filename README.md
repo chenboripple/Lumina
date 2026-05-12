@@ -5,7 +5,7 @@
 [![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](#-roadmap)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-> 🌟 **本地优先的 AI 笔记管道** — 把你散落的文档 / 邮件 / 会议纪要，自动转成 **Obsidian 友好**的结构化笔记。**文件不出本机**，**自带 LLM Key**，**提示词可改**。
+> 🌟 **本地优先的 AI 笔记管道** — 把你散落的文档 / 邮件 / 会议纪要，自动转成 **Obsidian 友好**的结构化笔记。**文件不出本机**，**用你自己的 LLM Key**，**提示词可改**。
 
 📖 Read this in [English](README.en.md)
 
