@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 from .cache import CacheManager
-from .utils.file_utils import get_file_hash, detect_file_type
+from .utils.file_operations import get_file_hash, detect_file_type
 from .document_cluster import DocumentClusterer, ClusterStrategy
 from .content_filter import ContentFilter
 from .content_analyzer import ContentAnalyzer, ContentBrief, BatchBriefResult

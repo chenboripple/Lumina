@@ -13,7 +13,7 @@ from datetime import datetime
 
 from .llm import get_llm_provider, LLMConfig, BaseLLMProvider
 from .cache import CacheManager
-from .utils.file_utils import get_file_hash
+from .utils.file_operations import get_file_hash
 
 
 @dataclass

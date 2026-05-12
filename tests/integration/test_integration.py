@@ -123,7 +123,7 @@ class TestConfigChain:
             "llm": {"provider": "openai", "api_key": "test-key", "model": "gpt-4"},
         }))
 
-        from lumina.config import LuminaConfig
+        from lumina.config_core import LuminaConfig
         lumina_config = LuminaConfig.load(str(config_file))
 
         assert len(lumina_config.input_sources) == 1
@@ -156,7 +156,7 @@ class TestConfigChain:
             "llm": {},
         }))
 
-        from lumina.config import LuminaConfig
+        from lumina.config_core import LuminaConfig
         lumina_config = LuminaConfig.load(str(config_file))
         errors = lumina_config.validate()
 

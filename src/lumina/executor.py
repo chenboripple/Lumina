@@ -221,9 +221,16 @@ class Executor:
         
         # 5. 选择提示词策略
         prompt_strategy = self._select_prompt_strategy(file_info)
-        
-        # 6. 构建提示词（使用场景模板或默认模板）
-        if detected_scene and self.scene_detector:
+
+        # 6. 构建提示词（优先使用增量模式，其次场景模板，最后默认模板）
+        incremental_strategy = file_info.metadata.get("incremental_strategy") == "incremental"
+        changed_blocks = file_info.metadata.get("incremental_changed_blocks")
+
+        if incremental_strategy and changed_blocks:
+            # 增量模式：仅发送变化部分给 LLM 以节省 token
+            prompt = self._build_prompt_incremental(file_info, changed_blocks, context)
+            prompt_strategy = "incremental"
+        elif detected_scene and self.scene_detector:
             # 使用场景化提示词
             template = self.scene_detector.get_template(detected_scene)
             if len(content_chunks) == 1:
@@ -265,49 +272,14 @@ class Executor:
             "cache_key": cache_key,
             "timestamp": datetime.now().isoformat(),
         }
+        if prompt_strategy == "incremental":
+            note.processing_info["incremental_change_ratio"] = file_info.metadata.get("incremental_change_ratio")
         
         # 10. 缓存结果
         self._cache_result(cache_key, note)
         
         return note
-    
-    def execute_with_stream(self, context: ExecutionContext) -> Iterator[str]:
-        """
-        流式执行笔记生成（实时展示进度）
-        
-        Yields:
-            处理进度信息
-        """
-        file_info = context.file_info
-        
-        yield f"📖 读取文件: {file_info.path.name}..."
-        content_chunks = self._read_file_smart(file_info.path)
-        yield f"✅ 读取完成，共 {len(content_chunks)} 个分块"
-        
-        yield "🧠 构建提示词..."
-        if len(content_chunks) == 1:
-            prompt = self._build_prompt_single(file_info, content_chunks[0], context)
-        else:
-            prompt = self._build_prompt_chunked(file_info, content_chunks, context)
-        
-        yield "🤖 调用 LLM..."
-        
-        # 流式调用
-        llm = self._get_llm()
-        full_response = []
-        for chunk in llm.stream(prompt):
-            full_response.append(chunk)
-            yield chunk  # 实时输出 LLM 生成的内容
-        
-        raw_output = "".join(full_response)
-        
-        yield "📝 解析输出..."
-        note = self._parse_output(raw_output, file_info, context)
-        
-        yield f"✅ 完成: {note.title}"
-        
-        return note
-    
+
     def revise(self, context: ExecutionContext) -> NoteOutput:
         """
         基于验证反馈修复笔记
@@ -361,38 +333,7 @@ class Executor:
             # 出错时回退到基本读取
             self._log(f"Multimodal extraction failed for {path}: {e}", level="warning")
             return self._read_text_file(path)
-    
-    def _read_text_file(self, path: Path) -> List[str]:
-        """基础文本文件读取"""
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = f.read()
-            
-            # 小文件：直接返回
-            if len(content) <= self.CHUNK_SIZE:
-                return [content]
-            
-            # 大文件：智能分块
-            return self._split_content(content)
-            
-        except Exception as e:
-            self._log(f"Text read failed for {path}: {e}", level="error")
-            return [f"[Error reading file: {e}]"]
-    
-    def _read_image(self, path: Path) -> str:
-        """读取图片（已迁移到 MultimodalExtractor）"""
-        # 保留此方法以兼容旧代码，实际逻辑在 MultimodalExtractor 中
-        extractor = MultimodalExtractor()
-        extracted = extractor.extract(path)
-        return extracted.text
-    
-    def _read_pdf(self, path: Path) -> List[str]:
-        """读取 PDF（已迁移到 MultimodalExtractor）"""
-        # 保留此方法以兼容旧代码，实际逻辑在 MultimodalExtractor 中
-        extractor = MultimodalExtractor()
-        extracted = extractor.extract(path)
-        return [extracted.text]
-    
+
     def _split_content(self, content: str) -> List[str]:
         """智能分块内容"""
         chunks = []
@@ -690,7 +631,85 @@ Return JSON with this structure:
     }}
 }}
 """
-    
+
+    def _build_prompt_incremental(self, file_info, changed_blocks: List[Dict[str, Any]], context: ExecutionContext) -> str:
+        """构建增量提示词：基于旧笔记，只更新对应于变化部分的笔记内容，保持其他部分不变"""
+        guidance = file_info.metadata.get("content_guidance", "")
+        guidance_block = f"6. {guidance}\n" if guidance else ""
+
+        # 检查是否有预分析的简述信息
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        brief_injection = ""
+        if brief_summary:
+            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
+
+        # 拼接变化的内容
+        changes_text = []
+        for i, block in enumerate(changed_blocks, 1):
+            block_type = block.get("type", "modified")
+            content = block.get("content", "")
+            old_content = block.get("old_content", "")
+            if block_type == "removed":
+                changes_text.append(f"### [REMOVED] Section {i} (lines {block['start_line']}-{block['end_line']})\n```\n{content}\n```")
+            elif block_type == "added":
+                changes_text.append(f"### [ADDED] Section {i} (lines {block['start_line']}-{block['end_line']})\n```\n{content}\n```")
+            elif block_type == "modified":
+                changes_text.append(
+                    f"### [MODIFIED] Section {i} (lines {block['start_line']}-{block['end_line']})\n"
+                    f"OLD:\n```\n{old_content}\n```\n"
+                    f"NEW:\n```\n{content}\n```"
+                )
+
+        change_ratio = file_info.metadata.get("incremental_change_ratio", 0.0)
+        old_note = file_info.metadata.get("incremental_old_note", "")
+
+        return f"""You are a knowledge extraction expert. A previously-processed source file was modified. Your task is to UPDATE the existing knowledge note to reflect only the changes, while keeping all other parts of the note intact.
+
+## Source Information
+- File: {file_info.path.name}
+- Type: {file_info.type}
+- Mode: incremental update
+- Change ratio: {change_ratio:.1%}
+{brief_injection}
+## Changed Sections of Source File
+{chr(10).join(changes_text)}
+
+## Previous Note (keep this structure, only update relevant parts)
+```
+{old_note}
+```
+
+## Instructions
+Generate an updated knowledge note based on the previous note and the changed sections of the source file:
+
+1. Keep the note structure, tone, and most content exactly the same as the previous note
+2. Only update sections related to the source file changes
+3. If sections were removed from the source, remove corresponding parts from the note
+4. If sections were added, add new corresponding parts to the note
+5. If sections were modified, update the corresponding parts of the note
+6. Ensure the updated note remains coherent and comprehensive
+{guidance_block}
+
+## Output Format
+Return JSON with this structure (keep the same structure, just update the content):
+{{
+    "title": "Updated topical title (keep the same if changes don't affect the topic)",
+    "summary": "Updated 2-4 sentence overview reflecting the changes",
+    "key_points": ["concrete takeaway 1", "concrete takeaway 2 (keep most points unchanged)"],
+    "supporting_details": ["important detail 1 (keep most details unchanged)"],
+    "action_items": ["follow-up if any (update only if changes affect actions)"],
+    "open_questions": ["unresolved question if any (update only if changes affect questions)"],
+    "tags": ["tag1", "tag2 (keep most tags unchanged)"],
+    "suggested_links": ["Topic A", "Topic B (keep most links unchanged)"],
+    "metadata": {{
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.9,
+        "update_mode": "incremental",
+        "change_ratio": {change_ratio}
+    }}
+}}
+"""
+
     def _build_fix_prompt(self, context: ExecutionContext) -> str:
         """构建修复提示词"""
         current = context.previous_output
@@ -771,182 +790,6 @@ Return JSON with this structure:
             )
             raise
 
-    async def _call_llm_async(self, prompt: str, context: ExecutionContext) -> str:
-        """异步调用 LLM（带统计）
-
-        使用 async_llm 模块的 AsyncLLMProviderFactory，与同步 _call_llm 保持
-        相同的统计与错误日志行为，便于在 Harness 中并发处理多文件。
-        """
-        from .async_llm import AsyncLLMProviderFactory
-
-        self.stats["total_calls"] += 1
-
-        provider = None
-        try:
-            llm_config = LLMConfig(
-                provider=self.llm_config.get("provider", "openai"),
-                base_url=self.llm_config.get("base_url"),
-                api_key=self.llm_config.get("api_key"),
-                model=self.llm_config.get("model", "gpt-4"),
-                temperature=self.llm_config.get("temperature", 0.3),
-                max_tokens=self.llm_config.get("max_tokens", 2000),
-                timeout=self.llm_config.get("timeout", 60),
-                max_retries=self.llm_config.get("max_retries", 3),
-                retry_delay=self.llm_config.get("retry_delay", 1.0),
-            )
-            provider = AsyncLLMProviderFactory.create(llm_config)
-            result = await provider.complete(prompt)
-            response = result.text
-
-            estimated_tokens = result.tokens_used or (len(prompt) / 4 + len(response) / 4)
-            estimated_cost = estimated_tokens * 0.01 / 1000
-            self.stats["total_tokens"] += estimated_tokens
-            self.stats["total_cost"] += estimated_cost
-
-            return response
-
-        except Exception as e:
-            self._log(
-                f"Async LLM request failed for {context.file_info.path} round={context.iteration + 1}: {e}",
-                level="error",
-            )
-            raise
-        finally:
-            if provider is not None:
-                try:
-                    await provider.close()
-                except Exception:
-                    pass
-
-    async def execute_async(self, context: ExecutionContext) -> NoteOutput:
-        """异步执行笔记生成（用于 Harness 异步批处理）
-
-        与 execute() 流程一致，但 LLM 调用使用 async_llm 模块以获得更高
-        的并发吞吐。其它步骤（文件读取、缓存、解析等）当前仍以同步方式
-        在协程中执行。
-        """
-        import asyncio
-
-        loop = asyncio.get_event_loop()
-        file_info = context.file_info
-
-        # 1. 同步路径中较重的本地 I/O / CPU 操作放到默认线程池执行
-        content_chunks = await loop.run_in_executor(
-            None, self._read_file_smart, file_info.path
-        )
-        full_content = "\n".join(content_chunks)
-        content_policy_metadata: Dict[str, Any] = {}
-
-        # 2. 内容过滤
-        if self.content_filter:
-            filter_result = self.content_filter.check(file_info.path, full_content)
-            if not filter_result.should_process:
-                self._log(
-                    f"Filtered {file_info.path}: {filter_result.reason}",
-                    level="info",
-                )
-                return NoteOutput(
-                    title=f"[FILTERED] {file_info.path.stem}",
-                    content=f"_Content filtered: {filter_result.reason}_",
-                    tags=["filtered"],
-                    links=[],
-                    source=str(file_info.path),
-                    metadata={
-                        "filtered": True,
-                        "filter_reason": filter_result.reason,
-                        "filter_confidence": filter_result.confidence,
-                    },
-                    processing_info={
-                        "session_id": context.session_id,
-                        "iteration": context.iteration,
-                        "filtered": True,
-                        "timestamp": datetime.now().isoformat(),
-                    },
-                )
-
-            content_policy_metadata = dict(filter_result.metadata or {})
-            sanitized_content, transform_meta = self.content_filter.sanitize_content(
-                full_content, content_policy_metadata,
-            )
-            if sanitized_content != full_content:
-                full_content = sanitized_content
-                content_chunks = (
-                    [full_content]
-                    if len(full_content) <= self.CHUNK_SIZE
-                    else self._split_content(full_content)
-                )
-            content_policy_metadata.update(transform_meta)
-            file_info.metadata["content_policy"] = content_policy_metadata
-
-            guidance = self.content_filter.build_processing_guidance(content_policy_metadata)
-            if guidance:
-                file_info.metadata["content_guidance"] = guidance
-
-        # 3. 场景检测
-        detected_scene = None
-        scene_confidence = 0.0
-        if self.scene_detector:
-            scene_result = self.scene_detector.detect(file_info.path, full_content)
-            detected_scene = scene_result.scene
-            scene_confidence = scene_result.confidence
-
-        # 4. 缓存
-        cache_key = self._generate_cache_key(file_info, content_chunks, detected_scene)
-        cached_result = self._check_cache(cache_key)
-        if cached_result:
-            self.stats["cache_hits"] += 1
-            return cached_result
-        self.stats["cache_misses"] += 1
-
-        # 5/6. 提示词
-        prompt_strategy = self._select_prompt_strategy(file_info)
-        if detected_scene and self.scene_detector:
-            template = self.scene_detector.get_template(detected_scene)
-            if len(content_chunks) == 1:
-                prompt = self._build_scene_prompt(
-                    template, file_info, content_chunks[0], context
-                )
-            else:
-                prompt = self._build_scene_prompt_chunked(
-                    template, file_info, content_chunks, context
-                )
-        else:
-            if len(content_chunks) == 1:
-                prompt = self._build_prompt_single(file_info, content_chunks[0], context)
-            else:
-                prompt = self._build_prompt_chunked(file_info, content_chunks, context)
-
-        # 7. 异步调用 LLM
-        raw_output = await self._call_llm_async(prompt, context)
-
-        # 8. 解析输出
-        if detected_scene and self.scene_detector:
-            template = self.scene_detector.get_template(detected_scene)
-            note = self._parse_scene_output(raw_output, file_info, context, template)
-        else:
-            note = self._parse_output(raw_output, file_info, context)
-
-        if self.content_filter and content_policy_metadata:
-            note = self._apply_content_policy(note, content_policy_metadata)
-
-        # 9. 处理信息
-        note.processing_info = {
-            "session_id": context.session_id,
-            "iteration": context.iteration,
-            "prompt_strategy": prompt_strategy,
-            "detected_scene": detected_scene.value if detected_scene else None,
-            "scene_confidence": scene_confidence,
-            "chunks_processed": len(content_chunks),
-            "cache_key": cache_key,
-            "timestamp": datetime.now().isoformat(),
-            "async": True,
-        }
-
-        # 10. 缓存
-        self._cache_result(cache_key, note)
-
-        return note
-    
     def _parse_output(self, raw_output: str, file_info, context: ExecutionContext) -> NoteOutput:
         """解析 LLM 输出"""
         try:
@@ -1174,140 +1017,7 @@ Return JSON with this structure:
             "total_tokens": 0,
             "total_cost": 0.0,
         }
-    
-    # ========== 新增集成方法 ==========
-    
-    def _select_prompt_template(self, file_info) -> str:
-        """选择提示词模板（使用新的 FILE_TYPE_TO_PROMPT 映射）"""
-        # 旧代码的 PROMPT_TEMPLATES，保留兼容
-        return getattr(self, "FILE_TYPE_TO_PROMPT", {}).get(file_info.type, "default_extractor")
-    
-    # ========== PromptManager 集成方法 ==========
-    
-    def _build_prompt_with_manager_single(
-        self, file_info, content: str, context: ExecutionContext, template_name: str
-    ) -> str:
-        """使用 PromptManager 构建单块提示词"""
-        guidance = file_info.metadata.get("content_guidance", "")
-        brief_summary = file_info.metadata.get("content_brief_summary", "")
-        
-        variables = {
-            "filename": file_info.path.name,
-            "file_type": file_info.type,
-            "content": content[:self.CHUNK_SIZE],
-            "guidance": guidance,
-            "brief_summary": brief_summary,
-        }
-        
-        # 尝试使用指定模板，不存在则使用默认
-        if hasattr(self, "prompt_manager") and self.prompt_manager.get(template_name):
-            return self.prompt_manager.render(template_name, **variables)
-        else:
-            # 降级回旧方法
-            return self._build_prompt_single(file_info, content, context)
-    
-    def _build_prompt_with_manager_chunked(
-        self, file_info, chunks: List[str], context: ExecutionContext, template_name: str
-    ) -> str:
-        """使用 PromptManager 构建分块提示词"""
-        guidance = file_info.metadata.get("content_guidance", "")
-        brief_summary = file_info.metadata.get("content_brief_summary", "")
-        
-        chunks_text = "\n\n".join([
-            f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
-            for i, chunk in enumerate(chunks)
-        ])
-        
-        variables = {
-            "filename": file_info.path.name,
-            "file_type": file_info.type,
-            "content": f"[This is a large document split into {len(chunks)} parts]\n\n{chunks_text}",
-            "num_chunks": len(chunks),
-            "guidance": guidance,
-            "brief_summary": brief_summary,
-        }
-        
-        # 尝试使用指定模板，不存在则使用默认
-        if hasattr(self, "prompt_manager") and self.prompt_manager.get(template_name):
-            return self.prompt_manager.render(template_name, **variables)
-        else:
-            # 降级回旧方法
-            return self._build_prompt_chunked(file_info, chunks, context)
-    
-    def _build_fix_prompt_with_manager(self, context: ExecutionContext) -> str:
-        """使用 PromptManager 构建修复提示词"""
-        current = context.previous_output
-        validation = context.previous_validation
-        
-        issues_text = "\n".join([
-            f"- [{i.severity}] {i.type}: {i.message}"
-            for i in validation.issues
-        ])
-        
-        suggestions_text = "\n".join([
-            f"- {s}"
-            for s in validation.suggestions
-        ])
-        
-        variables = {
-            "current_content": current.content[:2000],
-            "issues": issues_text,
-            "suggestions": suggestions_text,
-        }
-        
-        if hasattr(self, "prompt_manager") and self.prompt_manager.get("quality_validator"):
-            return self.prompt_manager.render("quality_validator", **variables)
-        else:
-            return self._build_fix_prompt(context)
-    
-    # ========== EventBus 集成方法 ==========
-    
-    def _publish_processing_events(
-        self,
-        file_info,
-        note: Optional['NoteOutput'],
-        duration: float,
-        success: bool = True,
-        error: str = None
-    ):
-        """发布处理事件到 EventBus"""
-        if not hasattr(self, "event_bus") or not self.event_bus:
-            return
-        
-        if success and note:
-            # 发布文件处理成功事件
-            self.event_bus.publish(
-                file_processed_event(
-                    file_path=str(file_info.path),
-                    note_path=note.source,
-                    score=note.metadata.get("confidence", 0.0),
-                    success=True,
-                    duration=duration
-                )
-            )
-            
-            # 发布笔记创建事件
-            self.event_bus.publish(
-                note_created_event(
-                    note_path=note.source,
-                    title=note.title,
-                    tags=note.tags,
-                    duration=duration
-                )
-            )
-        else:
-            # 发布文件处理失败事件
-            self.event_bus.publish(
-                file_failed_event(
-                    file_path=str(file_info.path),
-                    error=error or "Unknown error",
-                    error_type="processing_error",
-                    duration=duration
-                )
-            )
-    
-    # ========== 异常体系集成方法 ==========
-    
+
     def _read_text_file(self, path: Path) -> List[str]:
         """基础文本文件读取（使用新异常体系）"""
         try:

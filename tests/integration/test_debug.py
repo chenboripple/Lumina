@@ -61,7 +61,7 @@ class TestDebugMode:
     
     def test_validate_config(self, tmp_path):
         """配置验证应该返回错误列表"""
-        from lumina.config import LuminaConfig
+        from lumina.config_core import LuminaConfig
         
         # 创建无效配置
         config_file = tmp_path / "invalid_config.yaml"

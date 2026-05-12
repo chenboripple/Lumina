@@ -6,8 +6,6 @@ Lumina - 本地文件知识提取与结构化笔记生成系统
 - circuit_breaker: 熔断器模式
 - event_bus: 事件总线
 - prompt_manager: 提示词管理
-- async_llm: 异步 LLM 调用
-- health_check: 健康检查
 """
 from .exceptions import (
     LuminaError,
@@ -102,27 +100,6 @@ from .prompt_manager import (
     list_templates,
     save_template,
     score_template,
-)
-
-from .async_llm import (
-    AsyncLLMProvider,
-    AsyncLLMResult,
-    AsyncOpenAICompatibleProvider,
-    AsyncAnthropicProvider,
-    AsyncLLMProviderFactory,
-    get_async_llm_provider,
-    async_complete,
-    async_batch_complete,
-)
-
-from .health_check import (
-    HealthChecker,
-    HealthStatus,
-    ComponentCheck,
-    HealthReport,
-    get_health_checker,
-    get_health_report,
-    get_health_status,
 )
 
 __version__ = "0.3.0"

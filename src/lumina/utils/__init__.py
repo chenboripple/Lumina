@@ -13,6 +13,15 @@ from .logging import (
     get_performance_stats, reset_performance_stats,
     log_with_recovery, get_error_recovery,
 )
+from .file_operations import (
+    FileMetadata, ReplaceResult,
+    FilePermissionError, FileOperationError,
+    get_file_hash, detect_file_type,
+    detect_encoding, detect_line_endings,
+    read_file_with_metadata, write_file_with_metadata,
+    exact_replace, check_write_permission,
+    check_sensitive_content, is_file_modified,
+)
 
 __all__ = [
     'ProgressTracker',
@@ -34,4 +43,18 @@ __all__ = [
     'reset_performance_stats',
     'log_with_recovery',
     'get_error_recovery',
+    'FileMetadata',
+    'ReplaceResult',
+    'FilePermissionError',
+    'FileOperationError',
+    'get_file_hash',
+    'detect_file_type',
+    'detect_encoding',
+    'detect_line_endings',
+    'read_file_with_metadata',
+    'write_file_with_metadata',
+    'exact_replace',
+    'check_write_permission',
+    'check_sensitive_content',
+    'is_file_modified',
 ]

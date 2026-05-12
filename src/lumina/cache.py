@@ -24,15 +24,17 @@ class CacheManager:
     def __init__(self, cache_dir: str = "~/.lumina/cache"):
         self.cache_dir = Path(cache_dir).expanduser()
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # 子目录
         self.file_cache_dir = self.cache_dir / "files"
         self.llm_cache_dir = self.cache_dir / "llm"
         self.state_cache_dir = self.cache_dir / "state"
-        
+        self.content_cache_dir = self.cache_dir / "contents"
+
         self.file_cache_dir.mkdir(exist_ok=True)
         self.llm_cache_dir.mkdir(exist_ok=True)
         self.state_cache_dir.mkdir(exist_ok=True)
+        self.content_cache_dir.mkdir(exist_ok=True)
         
         # 缓存统计
         self.stats = {
@@ -64,6 +66,23 @@ class CacheManager:
         """检查文件是否已缓存"""
         cache_file = self.file_cache_dir / f"{file_hash}.json"
         return cache_file.exists()
+
+    def get_file_content(self, source_path: str) -> Optional[str]:
+        """获取上次处理时保存的文件原始内容（用于增量差异分析）"""
+        path_hash = hashlib.md5(source_path.encode()).hexdigest()
+        cache_file = self.content_cache_dir / f"{path_hash}.txt"
+        if cache_file.exists():
+            try:
+                return cache_file.read_text(encoding='utf-8')
+            except Exception:
+                pass
+        return None
+
+    def set_file_content(self, source_path: str, content: str) -> None:
+        """保存文件原始内容（用于下次增量差异分析）"""
+        path_hash = hashlib.md5(source_path.encode()).hexdigest()
+        cache_file = self.content_cache_dir / f"{path_hash}.txt"
+        cache_file.write_text(content, encoding='utf-8')
     
     def get_llm_response(self, prompt_hash: str) -> Optional[str]:
         """获取 LLM 响应缓存"""
@@ -144,6 +163,35 @@ class CacheManager:
         }
         cache_file.write_text(json.dumps(data, indent=2), encoding='utf-8')
     
+    def get_note_content(self, source_path: str) -> Optional[str]:
+        """获取上次为该源文件生成的笔记内容"""
+        path_hash = hashlib.md5(source_path.encode()).hexdigest()
+        cache_file = self.state_cache_dir / f"note_{path_hash}.json"
+        if cache_file.exists():
+            try:
+                data = json.loads(cache_file.read_text(encoding="utf-8"))
+                if self._is_valid(data):
+                    self.stats["hits"] += 1
+                    return data.get("note_content")
+                else:
+                    cache_file.unlink()
+                    self.stats["evictions"] += 1
+            except Exception:
+                pass
+        self.stats["misses"] += 1
+        return None
+
+    def set_note_content(self, source_path: str, note_content: str, ttl_days: int = 30) -> None:
+        """保存为该源文件生成的笔记内容"""
+        path_hash = hashlib.md5(source_path.encode()).hexdigest()
+        cache_file = self.state_cache_dir / f"note_{path_hash}.json"
+        data = {
+            "note_content": note_content,
+            "created_at": datetime.now().isoformat(),
+            "expires_at": (datetime.now() + timedelta(days=ttl_days)).isoformat(),
+        }
+        cache_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
     def _is_valid(self, data: Dict[str, Any]) -> bool:
         """检查缓存是否有效（未过期）"""
         if "expires_at" in data:
@@ -160,4 +208,6 @@ class CacheManager:
         for dir_path in [self.file_cache_dir, self.llm_cache_dir, self.state_cache_dir]:
             for f in dir_path.glob("*.json"):
                 f.unlink()
+        for f in self.content_cache_dir.glob("*.txt"):
+            f.unlink()
         self.stats = {"hits": 0, "misses": 0, "evictions": 0}
