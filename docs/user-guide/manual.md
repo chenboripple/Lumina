@@ -93,6 +93,7 @@ lumina process ~/Desktop/bymonth --no-vector --parallel
 - 失败项批量重生成、导出、删除、打标签
 - 已生成笔记浏览与单篇重生成
 - 向量搜索与知识图谱
+- 提示词模板在线编辑（导航栏「提示词」页面）
 
 ### 扫描状态语义
 
@@ -214,6 +215,61 @@ lumina stats
 ```
 
 说明：`search`、`related`、`graph`、`stats` 都依赖向量数据库。未索引过内容时，这些命令不会返回有效结果。
+
+## 提示词模板
+
+Lumina 把所有 LLM 提示词收敛在 `PromptManager` 里，存放在 `~/.lumina/prompts/`，每个模板一个 YAML 文件。首次启动时内置模板（默认、Markdown、文本、代码、PDF、图片、修复等）会自动落地，之后可以直接修改而无需改代码。
+
+### CLI 入口
+
+```bash
+# 查看
+lumina template list                       # 列出所有模板
+lumina template list --tag markdown        # 按标签筛选
+lumina template show default               # 查看模板详情
+lumina template show default --vars-only   # 仅查看变量
+
+# 编辑
+lumina template edit default                                   # 用 $EDITOR 打开
+lumina template create my_review --from-file ./review.md \
+  --description "Code review prompt" --tags code,review        # 从文件新建
+
+# 调试预览
+lumina template render default -v file_name=demo.md \
+  -v content_preview="hello"
+
+# 版本管理
+lumina template versions default           # 查看历史版本
+lumina template rollback default 1.0.0     # 回滚到某个版本
+
+# 导入导出
+lumina template export ./prompts_backup.json
+lumina template import ./prompts_backup.json
+
+# 删除
+lumina template delete my_review --yes
+```
+
+### Web UI 入口
+
+Web 仪表盘导航栏的 **「提示词」** 页面提供与 CLI 等价的能力：
+
+- 左侧：模板列表（含标签筛选）、新建按钮
+- 右侧上：模板编辑器，支持名称、描述、标签、内容、`{{变量}}` 占位
+- 右侧下：变量预览面板（实时渲染）+ 版本历史（带回滚按钮）
+
+模板使用 `{{变量名}}` 或 `{{变量名:默认值}}` 语法。保存时会自动从内容中提取变量列表，并生成新版本号；旧版本不会被删除，可随时回滚。
+
+### 模板与 Executor 的关系
+
+Executor 内部维护一张「文件类型 → 模板名称」的映射表（`EXECUTOR_TEMPLATES`）。例如：
+
+- `markdown` → `markdown`
+- `code` → `code`
+- `pdf` → `pdf`
+- 其他 → `default`
+
+修改对应模板就能影响该类文件的 LLM 处理结果，不需要改 Python 代码。若希望对 Executor 还没用到的场景预生成模板，也可以用 `lumina template create` 自由创建，配合 `pm.render(name, **kwargs)` 在自定义脚本中调用。
 
 ## 常见操作
 

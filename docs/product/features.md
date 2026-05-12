@@ -8,7 +8,8 @@
 
 - [src/lumina/web_interface.py](../../src/lumina/web_interface.py)
 - [src/lumina/web/templates/dashboard.html](../../src/lumina/web/templates/dashboard.html)
-- [src/lumina/web/static/js/app.js](../../src/lumina/web/static/js/app.js)
+- [src/lumina/web/static/js/react-app.jsx](../../src/lumina/web/static/js/react-app.jsx)（React 主界面，浏览器内 Babel 实时转译）
+- [src/lumina/web/static/js/app.js](../../src/lumina/web/static/js/app.js)（共享 utils / `luminaTranslate` 等全局函数）
 - [src/lumina/web/static/css/style.css](../../src/lumina/web/static/css/style.css)
 
 ### 当前可用能力
@@ -23,6 +24,7 @@
 - 语义搜索
 - 知识图谱
 - 向量统计展示
+- 提示词模板在线编辑（变量预览、版本回滚）
 
 ### 关键接口
 
@@ -42,6 +44,14 @@
 | `GET /api/graph` | 知识图谱 |
 | `GET /api/vector-stats` | 向量库统计 |
 | `GET /api/status` | Harness 原始运行状态 |
+| `GET /api/templates` | 提示词模板列表（可按 `tag` 过滤） |
+| `GET /api/templates/<name>` | 模板详情（含内容、变量） |
+| `POST /api/templates` | 新建模板（已存在返回 409） |
+| `PUT /api/templates/<name>` | 更新模板内容（自动 bump 版本） |
+| `DELETE /api/templates/<name>` | 删除模板 |
+| `GET /api/templates/<name>/versions` | 历史版本列表 |
+| `POST /api/templates/<name>/rollback` | 回滚到指定版本 |
+| `POST /api/templates/<name>/preview` | 用给定变量预览渲染结果 |
 
 ### 扫描状态语义
 
@@ -182,7 +192,31 @@
 
 前提是处理时启用了向量数据库，并且已经有成功写入的笔记被索引。
 
-## 8. 仍需谨慎看待的能力
+## 8. 提示词模板管理
+
+核心文件：
+
+- [src/lumina/prompt_manager.py](../../src/lumina/prompt_manager.py)
+- [src/lumina/executor.py](../../src/lumina/executor.py)
+
+当前可用能力：
+
+- **YAML 持久化**：用户自定义模板保存到 `~/.lumina/prompts/`，每个模板一个 `.yaml` 文件
+- **变量占位**：`{{var}}` / `{{var:default}}` 语法，自动从内容提取变量列表
+- **版本管理**：每次保存自动生成新版本号，保留全部历史快照
+- **一键回滚**：通过 `lumina template rollback` 或 Web UI 选择历史版本恢复
+- **内置模板**：默认/Markdown/文本/代码/PDF/图片/修复 等 Executor 场景模板会自动落地，可被用户覆盖
+- **导入导出**：`lumina template export/import` 支持跨设备迁移
+- **变量预览**：Web UI 提供实时填值预览，避免上线后再发现变量缺漏
+
+入口方式：
+
+- CLI：`lumina template list / show / edit / create / delete / versions / rollback / render / export / import`
+- Web UI：导航栏「提示词」页面，左侧列表 + 右侧编辑器 + 底部变量预览 / 版本历史
+- REST API：见上文 `/api/templates/*` 接口表
+- 代码：`from lumina.prompt_manager import get_prompt_manager; pm.render("default", file_name="x.md")`
+
+## 9. 仍需谨慎看待的能力
 
 下面这些接口或模块存在，但不应被文档表述为“成熟可用产品能力”：
 
