@@ -1,228 +1,235 @@
 # Lumina
 
-> 🌟 用 AI 自动整理你的本地文件，轻松生成结构化知识笔记
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org)
+[![Status](https://img.shields.io/badge/status-active-brightgreen.svg)](#-roadmap)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+> 🌟 **本地优先的 AI 笔记管道** — 把你散落的文档 / 邮件 / 会议纪要，自动转成 **Obsidian 友好**的结构化笔记。**文件不出本机**，**自带 LLM Key**，**提示词可改**。
+
+📖 Read this in [English](README.en.md)
 
 ---
 
-## ✨ 核心价值
+## 🎯 30 秒了解 Lumina
 
-**Lumina 不是一个笔记管理工具 —— 它是一个「知识处理管道」。**
+**你已经在用 Obsidian / Notion 管理笔记 —— 但还有 90% 的「半成品知识」散落在 Documents、Downloads、聊天截图里。**
 
-你的笔记仍然由 [Obsidian](https://obsidian.md)（或其他 Markdown 工具）来管理，Lumina 只做一件事：
-**把你的原始文件（文档、邮件、聊天记录、会议纪要...）转换成结构化的、可链接的知识笔记。**
+Lumina 是一根「整理管道」，把这些散文件喂进去，吐出**直接能落地到你已有笔记体系**的 Markdown：
 
-Lumina 帮你：
+```
+   ~/Documents/ 散文件          Lumina             ~/Obsidian/Vault/
+   meeting_0412.txt    ───▶    [AI 处理]   ───▶   工作/Projects/发版规划.md
+   research_notes.pdf                              学习/Resources/论文摘要.md
+   ChatLog.png                                     工作/Areas/团队沟通.md
+                                                   含 frontmatter + 双链 + 标签
+```
 
-- **📁 自动整理**：把散落的文档、笔记、邮件、会议记录转换成结构化的知识笔记
-- **🤖 AI 驱动**：支持本地模型 (Ollama/llama.cpp) 或云端 API (OpenAI/Anthropic/DeepSeek/国内大模型)
-- **🔗 双向链接**：自动识别文件关系，生成 Obsidian 风格的笔记
-- **🎯 场景感知**：自动识别会议纪要、学术论文、PRD、邮件、聊天记录等
-- **⚡ 增量更新**：只重新处理变化的文件
-- **🌐 Web 界面**：可视化查看进度、搜索、管理知识图谱
+它**不替代** Obsidian，它**喂养**你的 Obsidian。
 
-> **一句话理解 Lumina**：原始文件 → Lumina（AI 处理管道）→ Obsidian（笔记管理）
+---
+
+## 🆚 为什么选 Lumina
+
+| 维度 | **Lumina** | Reflect / Mem / Notion AI | Logseq + AI 插件 | Quivr |
+|---|---|---|---|---|
+| 数据存储 | ✅ 本地 | ❌ 云端锁定 | ✅ 本地 | 🔧 自托管 |
+| LLM 自由选 | ✅ OpenAI / Claude / Ollama / 国内大模型 | ❌ 内置不可换 | ⚠️ 依赖插件 | ✅ 你自己的 Key |
+| 输出格式 | ✅ Obsidian / Notion / Plain MD | ❌ 私有格式 | ✅ Markdown | ❌ 聊天界面 |
+| 提示词可改 | ✅ YAML + 版本回滚 | ❌ 黑盒 | ❌ 一般不行 | ⚠️ 改代码 |
+| 适用场景 | **批量整理** 已有散文件 | 新笔记输入 | 笔记编辑 + 检索 | RAG 问答 |
+| 价格 | ✅ 开源免费 + 你的 LLM 用量 | ❌ $10–20/月订阅 | ✅ 免费 | ✅ 开源 |
+
+**一句话**：如果你 **已经有一个 Vault**、**已经有一堆没整理的旧文件**、**不想把它们交给云端服务**，Lumina 就是为这个场景做的。
 
 ---
 
 ## 🚀 快速开始
 
-### 一键安装 (推荐)
+### 一键安装
 
-**macOS / Linux:**
+**macOS / Linux：**
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/chenboripple/Lumina/release-ripple/install.sh | bash
 ```
 
-**Windows (PowerShell):**
+**Windows (PowerShell)：**
 
 ```powershell
 irm https://raw.githubusercontent.com/chenboripple/Lumina/release-ripple/install.ps1 | iex
 ```
 
-安装脚本会自动：
-- ✅ 检查 Python 3.8+
-- ✅ 安装 Lumina
-- ✅ 可选安装 Ollama (本地模型，无需 API Key)
-- ✅ 运行 `lumina init` 交互式配置
+安装脚本会自动：检查 Python 3.8+ → 安装 Lumina → 可选装 Ollama（本地模型免 Key） → 运行 `lumina init`。
 
-### 配置 & 运行
+### 三行起步
 
 ```bash
-# 1. 交互式配置向导
-lumina init
+lumina init                          # 1) 交互式配置（选输入目录 / LLM / 输出格式）
+lumina start                         # 2) 后台启动常驻服务（自带 Web UI）
+open http://127.0.0.1:5088           # 3) 浏览器查看进度、搜索、改提示词
+```
 
-# 2. 后台启动常驻服务
-lumina start
+立即处理一个目录而不启常驻服务：
 
-# 3. 打开 Web 界面 (浏览器会自动打开)
-# http://127.0.0.1:5088
-
-# 4. 立即处理目录
+```bash
 lumina process ~/Documents
 ```
 
-### 常用命令
+---
 
-```bash
-# 后台服务
-lumina start    # 启动
-lumina status   # 查看状态
-lumina stop     # 停止
+## ✨ 看一个真实的转换效果
 
-# 一次性处理
-lumina process ~/Documents
+**输入** `~/Documents/meeting_2026-04-12.txt`：
 
-# 向量搜索
-lumina search "关键词"
-lumina related "某篇笔记"
-
-# 查看帮助
-lumina --help
 ```
+今天和小李、小王对了一下下周发版计划，
+决定先做 OAuth 改造再做支付重构，
+小李负责 OAuth，预计周五前出 demo。
+风险点：移动端 OAuth SDK 还没选定。
+```
+
+**输出** `~/Obsidian/Vault/工作/Projects/发版规划与-OAuth-重构会议.md`：
+
+```markdown
+---
+title: 发版规划与 OAuth 重构会议
+status: stable
+para: Projects
+aliases: [发版会议, OAuth 改造]
+up: "[[工作 Map]]"
+related: ["[[支付重构方案]]", "[[OAuth SDK 调研]]"]
+tags: [lumina/scene/meeting_notes, lumina/para/Projects]
+source: meeting_2026-04-12.txt
+---
+
+> [!info] 会议纪要
+> 2026-04-12 与小李、小王讨论发版计划
+
+## 决策
+- 先做 OAuth 改造，再做支付重构
+
+## 行动项
+- [ ] 小李：周五前出 OAuth demo
+- [ ] 待定：选定移动端 OAuth SDK
+
+## 风险
+- 移动端 OAuth SDK 还没选定
+```
+
+Lumina 自动完成：场景识别（会议纪要）→ 内容提取 → frontmatter 生成 → 双链推断 → 层级标签 → PARA 分类。
 
 ---
 
 ## 🌟 主要功能
 
 ### 📄 文件处理
-
-- **批量扫描**：自动识别知识文件
-- **📊 智能筛选**：过滤低价值文件、去重、敏感信息脱敏
-- **📝 自动摘要**：自动生成标题、摘要、标签
-- **🔄 增量更新**：只重跑内容变化的文件
-- **📂 文档聚合**：短文档按目录合并，项目目录生成总览
-- **🌍 全局知识地图**：生成全局知识图谱
-
-### 🎬 场景模板
-
-Lumina 会自动识别并适配：
-
-- 📋 **会议纪要**：自动提取议题、决策、行动项
-- 📄 **学术论文**：整理摘要、方法、结果、结论
-- 📐 **PRD/设计文档**：结构化产品需求、设计方案
-- 🧪 **测试报告**：提取测试结果、问题清单
-- 🖥️ **运维文档**：整理系统信息、故障处理
-- 📧 **邮件/聊天记录**：提取关键信息、行动项
+- **批量扫描**：自动识别 `.md / .txt / .pdf / .py / .png / .jpg ...` 等知识文件
+- **智能筛选**：过滤低价值文件、去重、敏感信息脱敏（手机号 / 邮箱 / 身份证）
+- **场景感知**：会议纪要 / 学术论文 / PRD / 设计文档 / 测试报告 / 运维文档 / 邮件 / 聊天记录 / 日记 / 任务清单 共 15 种内置场景
+- **增量更新**：基于内容哈希，只重跑变化的文件
+- **文档聚合**：短文档按目录合并、项目目录生成总览、批次级全局知识地图
 
 ### 🎨 多格式输出
 
-Lumina 生成的是纯 Markdown 文件，支持多种笔记工具：
+| 格式 | 适用 |
+|---|---|
+| **Obsidian** | YAML frontmatter + 场景 callout + 层级标签 + `[[双向链接]]` |
+| **Notion** | Properties 表格 + 标准 MD 链接，直接 `Import → Markdown` |
+| **Plain Markdown** | 通用，无工具依赖 |
 
-**Obsidian（推荐）**
-- YAML Frontmatter: `title`、`status`、`para`、`aliases`、`up`、`related`、`tags`、`source`
-- 场景感知的 `callout`
-- 层级标签：`lumina/scene/meeting_notes`
-- `[[双向链接]]` 自动识别相关文件
+### 🤖 LLM 自由选择
 
-**Notion**
-- Properties 表格（Notion 会自动识别）
-- 标准 Markdown 链接
-- 适合直接导入 Notion（选择 Import → Markdown）
+云端：OpenAI · Anthropic · DeepSeek · 阿里百炼 · 火山引擎 · Kimi · 智谱 GLM
+本地：Ollama · llama.cpp（完全离线、零 API 费）
 
-**Plain Markdown**
-- 通用 Markdown 格式
-- 可在任何 Markdown 编辑器中使用
-
-通过 `output.plugin` 配置选择输出格式。
-
-### 🤖 多 LLM Provider 支持
-
-| Provider | 特点 |
-|---------|------|
-| **Ollama** | 本地模型，完全免费，无需 API Key |
-| **llama.cpp** | 本地轻量模型 |
-| **OpenAI** | GPT-4/GPT-3.5 |
-| **Anthropic** | Claude 系列 |
-| **DeepSeek** | 深度求索 |
-| **百炼/Qwen** | 阿里云通义千问 |
-| **火山引擎** | 火山方舟 |
-| **Kimi** | 月之暗面 |
-| **智谱 GLM** | 智谱 AI |
+各 Agent 可独立配置：Planner 用便宜模型，Executor 用强模型，Validator 用快速模型。
 
 ### 🔍 向量能力
-
 - 语义搜索：自然语言找笔记
-- 关联笔记：找相关的知识
-- 知识图谱：可视化知识关联
-- 向量统计：查看知识覆盖
+- 关联笔记：找相关知识点
+- 知识图谱：可视化笔记之间的连接
+- 向量统计：查看知识覆盖度
+
+### ✍️ 提示词可热改
+
+不用改代码就能调整 LLM 行为：
+
+```bash
+lumina template list                  # 列出所有模板
+lumina template edit markdown         # 用 $EDITOR 改 Markdown 提取模板
+lumina template versions markdown     # 看版本历史
+lumina template rollback markdown 1   # 一键回滚
+```
+
+或在 Web UI 「提示词」页面在线编辑，左侧列表、右侧编辑器、底部实时变量预览。模板每次保存自动生成新版本，旧版本永远在 `~/.lumina/prompts/` 中可回滚。
 
 ### 🎛️ Web 仪表盘
 
-- 扫描队列、实时进度、速度、ETA
-- 最近一次运行结果
-- 失败项批量操作（重试/打标签/删除）
-- 语义搜索、知识图谱可视化
-- 向量统计
+- 扫描队列 / 实时进度 / ETA
+- 失败项批量重试、打标签、导出、删除
+- 语义搜索 + 知识图谱可视化
+- 提示词模板在线编辑器
 
 ---
 
-## 📖 详细文档
+## ❓ 常见问题
 
-- [安装指南](docs/deployment/installation.md)
-- [配置参考](docs/deployment/config-reference.md)
-- [用户手册](docs/user-guide/manual.md)
-- [功能说明](docs/product/features.md)
-- [架构设计](docs/design/architecture/planner.md)
-- [设计思路](docs/design/architecture/harness.md)
+**Q1：我的文件会上传到云端吗？**
+不会。Lumina 只把**单个文件的内容片段**发给你**自己配置的 LLM**。如果用 Ollama / llama.cpp，文件**完全不出本机**。
+
+**Q2：能不能完全离线运行？**
+能。`provider: ollama` + `model: llama3`（或 `mistral`、`qwen` 等），不需要任何 API Key，所有处理在你机器上完成。
+
+**Q3：处理 100 个文件大概多少成本？**
+用 GPT-4 全跑大约 $1–3，用 GPT-3.5 / DeepSeek 约 $0.05–0.2。Lumina 内置 LLM 响应缓存，第二次重跑同样文件不再花钱。
+
+**Q4：会覆盖我现有的 Obsidian Vault 吗？**
+不会。Lumina 默认输出到 `output.base_dir`（你自己配的目录），并按 `source` 字段匹配是否更新已有笔记，新文件直接走配置的 PARA + scene 路径，**不会动你手写的笔记**。
+
+**Q5：不用 Obsidian，可以吗？**
+可以。设置 `output.plugin: notion`（导 Notion 友好）或 `output.plugin: plain`（通用 Markdown），任何 MD 编辑器都能打开。
+
+**Q6：支持哪些文件类型？**
+内置支持 `.md / .txt / .pdf / .py / .js / .ts / .json / .yaml / .yml / .png / .jpg`，可在 `~/.lumina/lumina.yaml` 的 `supported_extensions` 里调整。
+
+**Q7：处理速度？**
+依赖 LLM 速度。本地 Ollama 大约 5–30 秒/文件；云端 API 1–5 秒/文件；重跑命中缓存 < 50ms/文件。
 
 ---
 
-## 🛠️ 手动安装
+## 🗺️ Roadmap
 
-```bash
-# 方式 1: git clone
-git clone https://github.com/chenboripple/Lumina.git
-cd Lumina
-python install.py
+✅ **已完成**：Planner（智能扫描）/ Executor（缓存 + 分块 + 流式）/ Harness（增量处理）/ PromptManager（YAML + 版本化）/ CacheManager / HistoryManager / 多 LLM Provider / Web UI（React）
 
-# 方式 2: pip install
-pip install "git+https://github.com/chenboripple/Lumina.git@release-ripple"
-```
+🔄 **进行中**：增强 Validator（历史对比 + 质量趋势）/ 关键路径单测补全 / 多设备同步 / 批量低质量笔记重处理
 
-## 配置
+详见 [升级路线图](docs/development/upgrade-guide.md)。
 
-所有运行配置来自 `~/.lumina/lumina.yaml`，包括：
-- `input.sources`：输入目录、递归策略、glob 过滤规则
-- `supported_extensions`：允许处理的扩展名
-- `output.base_dir` / `output.plugin`：输出目录和格式
-- `output.note_organization`：统一管理 scene/PARA 层级、场景规则和分类映射
-- `harness.max_iterations` / `harness.quality_threshold`
-- `llm` 以及 `llm_planner` / `llm_executor` / `llm_validator`
+---
 
-## 技术说明
+## 📖 文档
 
-### Planner
-- 同时执行 `supported_extensions` 和 `input.sources[].filter` 两层过滤
-- 为文件分配 `note_subdir`
-- 短文档会按目录聚合
-- 项目型目录会生成「项目总览」簇
-- 文件数量足够多时会插入「全局知识地图」任务
+- 📘 [安装指南](docs/deployment/installation.md)
+- ⚙️ [配置参考](docs/deployment/config-reference.md)
+- 📚 [用户手册](docs/user-guide/manual.md)
+- 🧩 [功能说明](docs/product/features.md)
+- 🏗️ [架构设计](docs/design/architecture/planner.md)
+- 🛠️ [贡献指南](CONTRIBUTING.md)
+- 📄 全部文档索引：[docs/index.md](docs/index.md)
 
-### Executor
-- 先做内容过滤，再做场景识别和 LLM 生成
-- 对低价值文件直接跳过，不进入验证与保存
-- 对生成结果执行标题归一化，避免落回原始文件名或占位标题
+---
 
-### Harness
-Planner → Executor → Validator → Harness 完整链路
+## 🤝 贡献
 
-## 许可证
+PR / Issue / 提示词模板分享都欢迎，参见 [CONTRIBUTING.md](CONTRIBUTING.md)。
 
-Lumina 采用双重许可证：
+---
 
-- **源代码**：[MIT License](LICENSE) — 允许商用，需保留版权声明
-- **知识库内容**：[CC BY 4.0](LICENSE) — 允许商用和修改，需署名
+## 📄 许可证
 
-这意味着你可以：
-- 自由使用、修改、分发 Lumina（商用或个人）
-- 使用 Lumina 处理商业文件并生成知识库
-- 唯一要求：保留版权声明和作者署名
+双许可：
+- **源代码**：[MIT](LICENSE) — 允许商用，保留版权声明
+- **生成的笔记内容**：CC BY 4.0 — 你拥有产出，仅需署名
 
-## 开发与验证
-
-```bash
-/usr/bin/python3 -m unittest tests.unit.test_content_policy tests.unit.test_planning_optimizations
-/usr/bin/python3 -m py_compile src/lumina/web_interface.py
-node --check src/lumina/web/static/js/app.js
-```
+意味着你可以：自由商用 / 修改 / 分发 Lumina，用它处理商业文件并产出知识库，唯一要求是保留版权与署名。

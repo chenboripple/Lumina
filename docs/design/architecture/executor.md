@@ -24,6 +24,7 @@ Executor 是 Lumina 的**智能执行引擎**，负责调用 LLM 生成结构化
 - **单块处理**：小文件直接处理，简单高效
 - **分块汇总**：大文件分块处理 + 汇总，确保内容完整性
 - **修复模式**：基于验证反馈自动修复内容
+- **热更新**：所有提示词均通过 `PromptManager` 管理，可在不改代码的情况下经 CLI 或 Web UI 修改并版本化
 
 ### 4. 🔄 迭代修复支持
 - **上下文感知**：修复时保留原始内容和验证反馈
@@ -56,10 +57,11 @@ Executor 是 Lumina 的**智能执行引擎**，负责调用 LLM 生成结构化
 │     - 基于内容哈希                           │
 │     - TTL 过期                               │
 │                                             │
-│  3. 提示词构建器 (PromptBuilder)             │
-│     - 类型感知策略                           │
-│     - 单块/分块模式                          │
-│     - 修复模式                               │
+│  3. 提示词管理 (PromptManager)               │
+│     - YAML 持久化（~/.lumina/prompts/）      │
+│     - 类型/策略 → 模板名映射                 │
+│     - {{var}} 占位 + 默认值                  │
+│     - 版本化 + 回滚                          │
 │                                             │
 │  4. LLM 调用器 (LLMCaller)                   │
 │     - 同步调用                               │
@@ -105,13 +107,14 @@ class ExecutionContext:
 ### 基础用法
 ```python
 from lumina.executor import Executor, ExecutionContext
-from lumina.planner import Planner
 from lumina.cache import CacheManager
+from lumina.prompt_manager import get_prompt_manager
 
-# 初始化
+# 初始化（不传 prompt_manager 时自动用全局单例）
 executor = Executor(
     llm_config={"provider": "openai", "model": "gpt-4"},
-    cache_manager=CacheManager()
+    cache_manager=CacheManager(),
+    prompt_manager=get_prompt_manager(),
 )
 
 # 创建执行上下文
@@ -171,15 +174,26 @@ if not validation.passed:
 | MAX_CHUNKS | 5 | 最多处理块数 |
 
 ### 提示词策略
-| 文件类型 | 策略 | 说明 |
+| 文件类型 | 策略名（`PROMPT_TEMPLATES`） | PromptManager 中的模板名 |
 |----------|------|------|
-| markdown | markdown_extractor | Markdown 文件提取 |
-| text | text_extractor | 文本文件提取 |
-| code | code_extractor | 代码文件提取 |
-| pdf | document_extractor | PDF 文档提取 |
-| image | image_extractor | 图片文件提取 |
-| data | data_extractor | 数据文件提取 |
-| default | default_extractor | 默认提取策略 |
+| markdown | markdown_extractor | `markdown_extractor` |
+| text | text_extractor | `text_extractor` |
+| code | code_extractor | `code_extractor` |
+| pdf | document_extractor | `document_extractor` |
+| image | image_extractor | `image_extractor` |
+| data | data_extractor | `data_extractor` |
+| default | default_extractor | `default_extractor` |
+
+另有四个执行流程级模板由 `EXECUTOR_TEMPLATES` 映射：
+
+| 用途 | 映射键 | PromptManager 模板名 |
+|------|--------|-----------------------|
+| 小文件单次处理 | `single` | `note_extractor_single` |
+| 大文件分块处理 | `chunked` | `note_extractor_chunked` |
+| 增量改动复用 | `incremental` | `note_extractor_incremental` |
+| 修复模式 | `revisor` | `note_revisor` |
+
+以上模板首次启动时会被自动落盘到 `~/.lumina/prompts/`，可以直接通过 `lumina template edit <name>` 或 Web UI 修改，无需改 Python 代码。
 
 ## 📊 输出示例
 
@@ -210,16 +224,38 @@ print(note.processing_info)
 ## 🔧 扩展开发
 
 ### 添加新的提示词策略
+
+提示词是 PromptManager 管理的 YAML 文件，扩展新策略 = 「注册一个模板 + 让 Executor 用它」。
+
 ```python
+from lumina.executor import Executor
+from lumina.prompt_manager import PromptTemplate, get_prompt_manager
+
+# 1) 创建（或覆盖）模板
+pm = get_prompt_manager()
+pm.save(PromptTemplate(
+    name="custom_extractor",
+    content="""提取 {{filename}} 的关键信息……
+
+{{content}}
+
+请返回 JSON: { "title": ..., "summary": ... }
+""",
+    description="自定义场景模板",
+    tags=["custom"],
+))
+
+# 2) 让 Executor 在该类型文件上用这个模板
 class CustomExecutor(Executor):
     PROMPT_TEMPLATES = {
         **Executor.PROMPT_TEMPLATES,
         "custom": "custom_extractor",
     }
-    
-    def _build_prompt_custom(self, file_info, content, context):
-        return f"""Custom prompt for {file_info.type}..."""
 ```
+
+> 提示：在 CLI 里直接用 `lumina template create custom_extractor --from-file ./tpl.md`
+> 或 Web UI「提示词」页面新建，效果完全等价；之后 `lumina template versions/rollback`
+> 都能正常工作。
 
 ### 自定义缓存键生成
 ```python
@@ -265,6 +301,7 @@ def _read_docx(self, path):
 |------|----------|----------|
 | 0.1.0 | 2026-04-21 | 初始版本，基础 LLM 调用 |
 | 0.2.0 | 2026-04-25 | Agent 增强版，缓存、分块、流式、修复 |
+| 0.3.0 | 2026-05-12 | 集成 PromptManager：提示词外置 YAML、版本化、可热更新 |
 
 ---
 

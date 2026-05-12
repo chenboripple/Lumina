@@ -13,21 +13,25 @@
 | **Planner** | Agent 增强版：智能扫描、变化检测、优先级排序、成本预估、能力识别、批量策略 | `src/lumina/planner.py` |
 | **CacheManager** | 三级缓存：文件缓存、LLM 响应缓存、状态缓存 | `src/lumina/cache.py` |
 | **HistoryManager** | 操作历史：SQLite 记录、版本管理、质量趋势、审计追踪、可解释性 | `src/lumina/history.py` |
+| **Harness** | 集成 Cache / History / FileChangeTracker，支持增量处理、断点续跑 | `src/lumina/harness.py` |
+| **Executor** | 集成 LLM 缓存、大文件智能分块、流式输出、修复模式 | `src/lumina/executor.py` |
+| **PromptManager** | 提示词外置 YAML、`{{var}}` 占位、版本化、回滚、CLI + Web 双入口 | `src/lumina/prompt_manager.py` |
+| **CLI** | `start` / `serve` / `process` / `search` / `related` / `graph` / `stats` / `template` 等增量与向量命令 | `src/lumina/cli.py` |
+| **Config** | 统一 LLM、缓存、历史、向量、Note Organization 配置；支持各 Agent 独立 LLM | `src/lumina/config.py` |
 | **FileUtils** | 文件工具：哈希计算、类型检测 | `src/lumina/utils/file_utils.py` |
 | **Planner 文档** | 完整架构文档、使用指南、API 参考 | `docs/design/architecture/planner.md` |
 | **Cache 文档** | 缓存系统文档、性能数据、最佳实践 | `docs/design/architecture/cache.md` |
 | **History 文档** | 历史系统文档、查询示例、扩展指南 | `docs/design/architecture/history.md` |
+| **Executor 文档** | Agent 能力 + PromptManager 集成说明 | `docs/design/architecture/executor.md` |
 
 ### 🔄 待完成
 
 | 模块 | 功能 | 优先级 |
 |------|------|--------|
-| **Harness** | 集成 Cache 和 History，支持增量处理 | 高 |
-| **Executor** | 集成 LLM 缓存，支持大文件分块 | 高 |
-| **Validator** | 增强质量评估，支持历史对比 | 中 |
-| **CLI** | 添加增量模式、缓存统计、历史查询命令 | 中 |
-| **Config** | 添加缓存配置、历史配置 | 中 |
-| **Tests** | 为新模块编写单元测试 | 高 |
+| **Validator** | 增强质量评估，支持历史对比与质量趋势分析 | 中 |
+| **Tests** | 为 PromptManager、Harness 增量分支、Executor 缓存命中等关键路径补单测 | 高 |
+| **多设备同步** | `sync/` 模块已预留，但默认主流程尚未启用，需要补完一致性与冲突策略 | 低 |
+| **批量低质量笔记重处理** | `/api/batch-repair` 接口存在，但低质量扫描逻辑还是占位实现 | 低 |
 
 ## 🚀 快速验证
 
@@ -103,51 +107,50 @@ print(history.get_explanation("test.md"))
 ```
 Lumina/
 ├── src/lumina/
-│   ├── planner.py          # 升级：Agent 增强版
-│   ├── cache.py            # 新增：缓存系统
-│   ├── history.py          # 新增：历史系统
+│   ├── planner.py            # 升级：Agent 增强版
+│   ├── harness.py            # 升级：Cache / History / 增量处理
+│   ├── executor.py           # 升级：LLM 缓存、分块、PromptManager 集成
+│   ├── cache.py              # 新增：缓存系统
+│   ├── history.py            # 新增：历史系统
+│   ├── prompt_manager.py     # 新增：YAML 提示词管理 + 版本化
+│   ├── async_llm.py          # 新增：异步 LLM 调用基础设施
+│   ├── circuit_breaker.py    # 新增：熔断器（保护 LLM 调用）
 │   └── utils/
-│       ├── __init__.py     # 新增
-│       └── file_utils.py   # 新增
+│       ├── __init__.py       # 新增
+│       └── file_utils.py     # 新增
 ├── docs/
-│   └── architecture/
-│       ├── planner.md      # 新增：Planner 文档
-│       ├── cache.md        # 新增：缓存文档
-│       └── history.md      # 新增：历史文档
+│   └── design/architecture/
+│       ├── planner.md        # 新增：Planner 文档
+│       ├── cache.md          # 新增：缓存文档
+│       ├── history.md        # 新增：历史文档
+│       ├── executor.md       # 更新：包含 PromptManager 集成
+│       ├── harness.md        # 更新：增量处理流程
+│       └── validator.md      # 现有
 ```
 
 ## 🔧 下一步工作
 
-### 1. 集成到 Harness
-修改 `src/lumina/harness.py`，集成新的 Planner、CacheManager、HistoryManager：
-- 使用增强版 Planner 制定处理计划
-- 使用 CacheManager 缓存中间结果
-- 使用 HistoryManager 记录处理历史
-- 支持增量处理模式
-
-### 2. 增强 Executor
-修改 `src/lumina/executor.py`：
-- 集成 LLM 响应缓存
-- 支持大文件分块处理
-- 记录执行历史
-
-### 3. 增强 Validator
+### 1. 增强 Validator
 修改 `src/lumina/validator.py`：
-- 添加历史对比功能
+- 添加历史对比功能（基于 HistoryManager 的处理轨迹）
 - 支持质量趋势分析
-- 增强评分算法
+- 增强评分算法对 PromptManager 模板调优后的样本进行 A/B 验证
 
-### 4. 扩展 CLI
-修改 `src/lumina/cli.py`：
-- 添加 `--incremental` 参数
-- 增加 `start` / `serve` / `process` 的服务化运行参数
-- 增加 `search` / `related` / `graph` / `stats` 等向量相关命令
+### 2. 完善测试
+为关键路径补充单元测试：
+- `tests/unit/test_prompt_manager.py`：变量解析、版本化、回滚、import/export
+- `tests/unit/test_executor_cache.py`：缓存命中、TTL、内容哈希
+- `tests/unit/test_harness_incremental.py`：增量识别、失败重试、断点续跑
 
-### 5. 编写测试
-为所有新模块编写单元测试：
-- `tests/unit/test_planner.py`
-- `tests/unit/test_cache.py`
-- `tests/unit/test_history.py
+### 3. 多设备同步
+`sync/` 模块已预留接口，但默认主流程尚未启用：
+- 设计一致性与冲突策略
+- 与 `FileChangeTracker` 协同避免误报
+
+### 4. 批量低质量笔记重处理
+`/api/batch-repair` 接口存在但低质量扫描逻辑仍是占位实现：
+- 接入 `HistoryManager` 的质量趋势
+- 补充 Validator 评分阈值的批处理调度
 
 ## 📊 预期效果
 

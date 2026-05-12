@@ -355,3 +355,21 @@ lumina start
 # 指定配置文件路径
 lumina start --config /path/to/custom.yaml
 ```
+
+---
+
+## 其他与配置相关的本地存储
+
+`~/.lumina/lumina.yaml` 只描述配置，Lumina 运行时还会在用户主目录下维护几类持久化数据：
+
+| 路径 | 内容 | 何时生成 |
+|---|---|---|
+| `~/.lumina/cache/` | LLM 响应缓存、文件缓存、状态缓存（按内容哈希） | 启用 `CacheManager` 后自动生成 |
+| `~/.lumina/fingerprints/` | `FileChangeTracker` 用于增量识别的内容指纹 | 首次扫描完成后 |
+| `~/.lumina/history/` | `HistoryManager` 的 SQLite 操作历史 | 第一次执行后 |
+| `~/.lumina/prompts/` | 用户可编辑的提示词模板 YAML 文件（每个模板一个文件 + 历史版本） | 第一次启动或第一次保存模板 |
+| `~/.lumina/logs/` | 服务日志，按 `service.log_retention_days` 滚动 | 启动后 |
+
+> 提示词模板可通过 `lumina template ...` CLI 或 Web 仪表盘「提示词」页面修改；
+> 内置的 7 套模板（默认 / Markdown / 文本 / 代码 / PDF / 图片 / 修复）在首次启动时会自动落到 `~/.lumina/prompts/`，
+> 用户的修改保存为新版本，可随时回滚。
