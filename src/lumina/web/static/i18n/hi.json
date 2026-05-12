@@ -7,7 +7,8 @@
     "search": "खोज",
     "graph": "नॉलेज ग्राफ",
     "notes": "नोट्स",
-    "config": "कॉन्फ़िग"
+    "config": "कॉन्फ़िग",
+    "templates": "टेम्पलेट"
   },
   "locale": {
     "label": "भाषा"
@@ -129,6 +130,9 @@
     },
     "config": {
       "title": "⚙️ Config"
+    },
+    "templates": {
+      "title": "📋 प्रॉम्प्ट टेम्पलेट"
     }
   },
   "stats": {

@@ -7,7 +7,8 @@
     "search": "تلاش",
     "graph": "علمی گراف",
     "notes": "نوٹس",
-    "config": "ترتیبات"
+    "config": "ترتیبات",
+    "templates": "ٹیمپلیٹس"
   },
   "locale": {
     "label": "زبان"
@@ -129,6 +130,9 @@
     },
     "config": {
       "title": "⚙️ Config"
+    },
+    "templates": {
+      "title": "📋 پرامپٹ ٹیمپلیٹس"
     }
   },
   "stats": {

@@ -7,7 +7,8 @@
     "search": "検索",
     "graph": "ナレッジグラフ",
     "notes": "ノート",
-    "config": "設定"
+    "config": "設定",
+    "templates": "テンプレート"
   },
   "locale": {
     "label": "言語"
@@ -27,6 +28,9 @@
     },
     "config": {
       "title": "⚙️ 設定"
+    },
+    "templates": {
+      "title": "📋 プロンプトテンプレート"
     }
   },
   "action": {

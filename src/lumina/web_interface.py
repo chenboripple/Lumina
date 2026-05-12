@@ -29,6 +29,7 @@ from .validator import Validator
 from .plugins import get_plugin
 from .config_core import LuminaConfig, USER_CONFIG_FILE
 from .llm import LLMProviderFactory
+from .prompt_manager import get_prompt_manager, PromptTemplate
 
 # 新功能集成
 from .health_check import get_health_status
@@ -822,6 +823,232 @@ class WebInterface:
         def serve_static(filename):
             """提供静态文件"""
             return send_from_directory(self._get_static_dir(), filename)
+
+        # ==================== Prompt Template API ====================
+
+        # API: 列出所有模板
+        @self.app.route('/api/templates', methods=['GET'])
+        def api_templates_list():
+            """获取所有提示词模板"""
+            try:
+                tag = request.args.get('tag')
+                pm = get_prompt_manager()
+                templates = pm.list_templates(tag=tag)
+                return jsonify({
+                    "templates": [self._serialize_template(t) for t in templates],
+                    "total": len(templates),
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 获取单个模板详情
+        @self.app.route('/api/templates/<name>', methods=['GET'])
+        def api_template_detail(name):
+            """获取提示词模板详情"""
+            try:
+                pm = get_prompt_manager()
+                template = pm.get(name)
+                if template is None:
+                    return jsonify({"error": f"Template not found: {name}"}), 404
+                return jsonify(self._serialize_template(template, include_content=True))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 创建新模板
+        @self.app.route('/api/templates', methods=['POST'])
+        def api_template_create():
+            """创建新提示词模板"""
+            try:
+                data = request.get_json() or {}
+                name = str(data.get('name', '')).strip()
+                content = data.get('content', '')
+
+                if not name:
+                    return jsonify({"error": "name is required"}), 400
+                if not content:
+                    return jsonify({"error": "content is required"}), 400
+
+                pm = get_prompt_manager()
+                if pm.get(name) is not None:
+                    return jsonify({"error": f"Template already exists: {name}"}), 409
+
+                template = PromptTemplate(
+                    name=name,
+                    content=content,
+                    description=data.get('description', ''),
+                    tags=list(data.get('tags', [])) if isinstance(data.get('tags'), list) else [],
+                )
+                pm.save(template)
+                return jsonify(self._serialize_template(template, include_content=True)), 201
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 更新模板
+        @self.app.route('/api/templates/<name>', methods=['PUT'])
+        def api_template_update(name):
+            """更新提示词模板（生成新版本）"""
+            try:
+                data = request.get_json() or {}
+                pm = get_prompt_manager()
+                existing = pm.get(name)
+                if existing is None:
+                    return jsonify({"error": f"Template not found: {name}"}), 404
+
+                content = data.get('content', existing.content)
+                description = data.get('description', existing.description)
+                tags = data.get('tags', existing.tags)
+                if not isinstance(tags, list):
+                    tags = existing.tags
+
+                updated = PromptTemplate(
+                    name=name,
+                    content=content,
+                    description=description,
+                    version=existing.version,
+                    tags=list(tags),
+                    metadata=dict(existing.metadata),
+                )
+                pm.save(updated)
+                return jsonify(self._serialize_template(updated, include_content=True))
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 删除模板
+        @self.app.route('/api/templates/<name>', methods=['DELETE'])
+        def api_template_delete(name):
+            """删除提示词模板"""
+            try:
+                pm = get_prompt_manager()
+                if pm.get(name) is None:
+                    return jsonify({"error": f"Template not found: {name}"}), 404
+                ok = pm.delete(name)
+                return jsonify({"success": ok, "name": name})
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 获取模板版本历史
+        @self.app.route('/api/templates/<name>/versions', methods=['GET'])
+        def api_template_versions(name):
+            """获取模板版本历史"""
+            try:
+                pm = get_prompt_manager()
+                if pm.get(name) is None:
+                    return jsonify({"error": f"Template not found: {name}"}), 404
+                versions = pm.get_versions(name)
+                return jsonify({
+                    "name": name,
+                    "total": len(versions),
+                    "versions": [
+                        {
+                            "version": v.version,
+                            "created_at": v.created_at,
+                            "created_at_iso": datetime.fromtimestamp(v.created_at).isoformat(),
+                            "author": v.author,
+                            "change_log": v.change_log,
+                            "is_active": v.is_active,
+                        }
+                        for v in versions
+                    ],
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 回滚到指定版本
+        @self.app.route('/api/templates/<name>/rollback', methods=['POST'])
+        def api_template_rollback(name):
+            """回滚模板到指定版本"""
+            try:
+                data = request.get_json() or {}
+                version = str(data.get('version', '')).strip()
+                if not version:
+                    return jsonify({"error": "version is required"}), 400
+
+                pm = get_prompt_manager()
+                if pm.get(name) is None:
+                    return jsonify({"error": f"Template not found: {name}"}), 404
+
+                ok = pm.rollback(name, version)
+                if not ok:
+                    return jsonify({"error": f"Version not found: {version}"}), 404
+
+                pm.save(pm.get(name))
+                return jsonify({
+                    "success": True,
+                    "name": name,
+                    "version": version,
+                    "template": self._serialize_template(pm.get(name), include_content=True),
+                })
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+        # API: 预览/渲染模板
+        @self.app.route('/api/templates/<name>/preview', methods=['POST'])
+        def api_template_preview(name):
+            """使用提供的变量渲染模板，预览输出"""
+            try:
+                data = request.get_json() or {}
+                variables = data.get('variables', {})
+                if not isinstance(variables, dict):
+                    return jsonify({"error": "variables must be an object"}), 400
+
+                pm = get_prompt_manager()
+                template = pm.get(name)
+                if template is None:
+                    return jsonify({"error": f"Template not found: {name}"}), 404
+
+                missing = []
+                str_vars = {}
+                for var in template.variables:
+                    if var.name in variables:
+                        str_vars[var.name] = str(variables[var.name])
+                    elif var.default_value is not None:
+                        str_vars[var.name] = str(var.default_value)
+                    elif var.required:
+                        missing.append(var.name)
+
+                if missing:
+                    return jsonify({
+                        "error": "Missing required variables",
+                        "missing_variables": missing,
+                    }), 400
+
+                rendered = template.render(**str_vars)
+                return jsonify({
+                    "name": name,
+                    "version": template.version,
+                    "rendered": rendered,
+                    "variables": str_vars,
+                })
+            except ValueError as exc:
+                return jsonify({"error": str(exc)}), 400
+            except Exception as e:
+                return jsonify({"error": str(e)}), 500
+
+    def _serialize_template(self, template: PromptTemplate, include_content: bool = False) -> Dict[str, Any]:
+        """序列化模板用于 API 响应"""
+        data = {
+            "name": template.name,
+            "description": template.description,
+            "version": template.version,
+            "tags": list(template.tags),
+            "variables": [
+                {
+                    "name": v.name,
+                    "description": v.description,
+                    "required": v.required,
+                    "default_value": v.default_value,
+                }
+                for v in template.variables
+            ],
+            "created_at": template.created_at,
+            "updated_at": template.updated_at,
+            "created_at_iso": datetime.fromtimestamp(template.created_at).isoformat(),
+            "updated_at_iso": datetime.fromtimestamp(template.updated_at).isoformat(),
+        }
+        if include_content:
+            data["content"] = template.content
+            data["metadata"] = dict(template.metadata)
+        return data
 
     def _resolve_allowed_source(self, source_path: Path):
         """根据当前配置判断源文件是否允许重新生成，并返回匹配到的输入源规则。"""

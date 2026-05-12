@@ -7,7 +7,8 @@
     "search": "검색",
     "graph": "지식 그래프",
     "notes": "노트",
-    "config": "설정"
+    "config": "설정",
+    "templates": "템플릿"
   },
   "locale": {
     "label": "언어"
@@ -27,6 +28,9 @@
     },
     "config": {
       "title": "⚙️ 설정"
+    },
+    "templates": {
+      "title": "📋 프롬프트 템플릿"
     }
   },
   "action": {

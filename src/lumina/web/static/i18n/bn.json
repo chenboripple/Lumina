@@ -7,7 +7,8 @@
     "search": "অনুসন্ধান",
     "graph": "জ্ঞান গ্রাফ",
     "notes": "নোট",
-    "config": "কনফিগ"
+    "config": "কনফিগ",
+    "templates": "টেমপ্লেট"
   },
   "locale": {
     "label": "ভাষা"
@@ -129,6 +130,9 @@
     },
     "config": {
       "title": "⚙️ Config"
+    },
+    "templates": {
+      "title": "📋 প্রম্পট টেমপ্লেট"
     }
   },
   "stats": {

@@ -7,7 +7,8 @@
     "search": "Buscar",
     "graph": "Grafo de Conocimiento",
     "notes": "Notas",
-    "config": "Configuración"
+    "config": "Configuración",
+    "templates": "Plantillas"
   },
   "locale": {
     "label": "Idioma"
@@ -27,6 +28,9 @@
     },
     "config": {
       "title": "⚙️ Configuración"
+    },
+    "templates": {
+      "title": "📋 Plantillas de Prompt"
     }
   },
   "action": {

@@ -848,6 +848,411 @@ function ReactConfigView({ active }) {
   );
 }
 
+function ReactTemplatesView({ active }) {
+  const [templates, setTemplates] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [hint, setHint] = useState('');
+  const [selectedName, setSelectedName] = useState('');
+  const [detail, setDetail] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editContent, setEditContent] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [editTags, setEditTags] = useState('');
+  const [isCreating, setIsCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [previewVars, setPreviewVars] = useState({});
+  const [previewOutput, setPreviewOutput] = useState('');
+  const [previewMissing, setPreviewMissing] = useState([]);
+  const [versions, setVersions] = useState([]);
+  const [tagFilter, setTagFilter] = useState('');
+
+  const loadTemplates = async (focusName) => {
+    setLoading(true);
+    setError('');
+    try {
+      const query = tagFilter ? `?tag=${encodeURIComponent(tagFilter)}` : '';
+      const data = await requestJson(`/api/templates${query}`);
+      const list = Array.isArray(data?.templates) ? data.templates : [];
+      setTemplates(list);
+      if (focusName && list.some((t) => t.name === focusName)) {
+        await loadDetail(focusName);
+      } else if (!selectedName && list.length > 0) {
+        await loadDetail(list[0].name);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load templates');
+      setTemplates([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadDetail = async (name) => {
+    if (!name) return;
+    setError('');
+    try {
+      const data = await requestJson(`/api/templates/${encodeURIComponent(name)}`);
+      setSelectedName(name);
+      setDetail(data);
+      setEditName(data.name || '');
+      setEditContent(data.content || '');
+      setEditDescription(data.description || '');
+      setEditTags(Array.isArray(data.tags) ? data.tags.join(', ') : '');
+      setIsCreating(false);
+      const initialVars = {};
+      (data.variables || []).forEach((v) => {
+        initialVars[v.name] = v.default_value || '';
+      });
+      setPreviewVars(initialVars);
+      setPreviewOutput('');
+      setPreviewMissing([]);
+
+      try {
+        const verData = await requestJson(`/api/templates/${encodeURIComponent(name)}/versions`);
+        setVersions(Array.isArray(verData?.versions) ? verData.versions : []);
+      } catch (_) {
+        setVersions([]);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to load template');
+      setDetail(null);
+    }
+  };
+
+  useEffect(() => {
+    if (active) {
+      loadTemplates();
+    }
+  }, [active]);
+
+  useEffect(() => {
+    if (active) {
+      loadTemplates(selectedName);
+    }
+  }, [tagFilter]);
+
+  const onCreateNew = () => {
+    setIsCreating(true);
+    setSelectedName('');
+    setDetail(null);
+    setEditName('');
+    setEditContent('');
+    setEditDescription('');
+    setEditTags('');
+    setPreviewVars({});
+    setPreviewOutput('');
+    setPreviewMissing([]);
+    setVersions([]);
+  };
+
+  const onSave = async () => {
+    setSaving(true);
+    setHint('');
+    setError('');
+    try {
+      const tagsArr = String(editTags || '')
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean);
+
+      if (isCreating) {
+        if (!editName.trim()) {
+          setError('Template name is required');
+          setSaving(false);
+          return;
+        }
+        const created = await requestJson('/api/templates', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: editName.trim(),
+            content: editContent,
+            description: editDescription,
+            tags: tagsArr,
+          }),
+        });
+        setHint(`Created template: ${created.name}`);
+        await loadTemplates(created.name);
+      } else {
+        if (!selectedName) {
+          setError('No template selected');
+          setSaving(false);
+          return;
+        }
+        const updated = await requestJson(`/api/templates/${encodeURIComponent(selectedName)}`, {
+          method: 'PUT',
+          body: JSON.stringify({
+            content: editContent,
+            description: editDescription,
+            tags: tagsArr,
+          }),
+        });
+        setHint(`Updated template: ${updated.name} (v${updated.version})`);
+        await loadTemplates(selectedName);
+      }
+    } catch (err) {
+      setError(err.message || 'Failed to save template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onDelete = async () => {
+    if (!selectedName) return;
+    if (!window.confirm(`Delete template "${selectedName}"? This cannot be undone.`)) {
+      return;
+    }
+    setSaving(true);
+    setHint('');
+    setError('');
+    try {
+      await requestJson(`/api/templates/${encodeURIComponent(selectedName)}`, {
+        method: 'DELETE',
+      });
+      setHint(`Deleted: ${selectedName}`);
+      setSelectedName('');
+      setDetail(null);
+      await loadTemplates();
+    } catch (err) {
+      setError(err.message || 'Failed to delete template');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const onPreview = async () => {
+    if (!selectedName) return;
+    setError('');
+    setHint('');
+    setPreviewOutput('');
+    setPreviewMissing([]);
+    try {
+      const data = await requestJson(`/api/templates/${encodeURIComponent(selectedName)}/preview`, {
+        method: 'POST',
+        body: JSON.stringify({ variables: previewVars }),
+      });
+      setPreviewOutput(data?.rendered || '');
+    } catch (err) {
+      let parsed = null;
+      try {
+        const match = String(err.message || '').match(/\{.*\}$/);
+        if (match) parsed = JSON.parse(match[0]);
+      } catch (_) {
+        parsed = null;
+      }
+      if (parsed && Array.isArray(parsed.missing_variables)) {
+        setPreviewMissing(parsed.missing_variables);
+      }
+      setError(err.message || 'Preview failed');
+    }
+  };
+
+  const onRollback = async (version) => {
+    if (!selectedName || !version) return;
+    if (!window.confirm(`Rollback "${selectedName}" to v${version}?`)) {
+      return;
+    }
+    setSaving(true);
+    setHint('');
+    setError('');
+    try {
+      await requestJson(`/api/templates/${encodeURIComponent(selectedName)}/rollback`, {
+        method: 'POST',
+        body: JSON.stringify({ version }),
+      });
+      setHint(`Rolled back to v${version}`);
+      await loadDetail(selectedName);
+    } catch (err) {
+      setError(err.message || 'Rollback failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const tagSet = useMemo(() => {
+    const all = new Set();
+    templates.forEach((t) => (t.tags || []).forEach((tag) => all.add(tag)));
+    return Array.from(all).sort();
+  }, [templates]);
+
+  return (
+    <div id="templates-view" className={`view ${active ? 'active' : ''}`}>
+      <h1 className="page-title" data-i18n="view.templates.title">📋 提示词模板</h1>
+
+      {loading ? <p className="loading">Loading templates...</p> : null}
+      {!loading && error ? <p className="hint">{error}</p> : null}
+      {!loading && hint ? <p className="hint">{hint}</p> : null}
+
+      <div className="config-grid-2">
+        <div className="panel">
+          <h2 className="panel-title">📚 模板列表 ({templates.length})</h2>
+          <div className="quick-actions">
+            <button className="btn btn-primary" onClick={onCreateNew}>+ 新建模板</button>
+            <button className="btn btn-secondary" onClick={() => loadTemplates(selectedName)}>刷新</button>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Filter by tag</label>
+            <select className="form-input" value={tagFilter} onChange={(e) => setTagFilter(e.target.value)}>
+              <option value="">All tags</option>
+              {tagSet.map((tag) => (
+                <option key={tag} value={tag}>{tag}</option>
+              ))}
+            </select>
+          </div>
+          <div className="search-results">
+            {templates.map((t) => (
+              <div
+                key={t.name}
+                className={`note-card ${selectedName === t.name ? 'active' : ''}`}
+                onClick={() => loadDetail(t.name)}
+              >
+                <div className="note-title">{t.name}</div>
+                <div className="note-meta">
+                  <span>v{t.version}</span>
+                  <span>{(t.tags || []).join(', ')}</span>
+                </div>
+                {t.description ? <div className="result-preview">{t.description}</div> : null}
+              </div>
+            ))}
+            {templates.length === 0 && !loading ? <p className="hint">暂无模板</p> : null}
+          </div>
+        </div>
+
+        <div className="panel">
+          <h2 className="panel-title">
+            {isCreating ? '🆕 新建模板' : (selectedName ? `✏️ 编辑: ${selectedName}` : '请选择模板')}
+          </h2>
+
+          {(isCreating || selectedName) ? (
+            <div>
+              {isCreating ? (
+                <div className="form-group">
+                  <label className="form-label">Name</label>
+                  <input
+                    className="form-input"
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="my_template_name"
+                  />
+                </div>
+              ) : null}
+              <div className="form-group">
+                <label className="form-label">Description</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Tags (comma-separated)</label>
+                <input
+                  className="form-input"
+                  type="text"
+                  value={editTags}
+                  onChange={(e) => setEditTags(e.target.value)}
+                  placeholder="extraction, custom"
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">
+                  Content (use {'{{var_name}}'} for variables)
+                </label>
+                <textarea
+                  className="form-input json-input config-tall-preview"
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                />
+              </div>
+              <div className="quick-actions">
+                <button className="btn btn-primary" onClick={onSave} disabled={saving}>
+                  {isCreating ? '创建模板' : '保存（生成新版本）'}
+                </button>
+                {!isCreating ? (
+                  <button className="btn btn-warning" onClick={onDelete} disabled={saving}>
+                    删除模板
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : (
+            <p className="hint">在左侧选择一个模板进行编辑，或点击"新建模板"创建。</p>
+          )}
+        </div>
+      </div>
+
+      {detail && !isCreating ? (
+        <div className="config-grid-2">
+          <div className="panel">
+            <h2 className="panel-title">🧪 变量预览</h2>
+            {(detail.variables || []).length === 0 ? (
+              <p className="hint">此模板没有变量</p>
+            ) : (
+              <div>
+                {(detail.variables || []).map((v) => (
+                  <div className="form-group" key={v.name}>
+                    <label className="form-label">
+                      {v.name}{v.required ? ' *' : ''}
+                      {previewMissing.includes(v.name) ? <span style={{ color: 'crimson' }}> (missing)</span> : null}
+                    </label>
+                    <textarea
+                      className="form-input"
+                      rows="2"
+                      value={previewVars[v.name] || ''}
+                      onChange={(e) => setPreviewVars({ ...previewVars, [v.name]: e.target.value })}
+                      placeholder={v.default_value || ''}
+                    />
+                  </div>
+                ))}
+                <div className="quick-actions">
+                  <button className="btn btn-primary" onClick={onPreview}>渲染预览</button>
+                </div>
+              </div>
+            )}
+            {previewOutput ? (
+              <div className="form-group">
+                <label className="form-label">渲染结果</label>
+                <pre className="json-preview config-tall-preview">{previewOutput}</pre>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="panel">
+            <h2 className="panel-title">📜 版本历史 ({versions.length})</h2>
+            {versions.length === 0 ? (
+              <p className="hint">暂无版本历史</p>
+            ) : (
+              <div className="search-results">
+                {versions.map((v, idx) => (
+                  <div className="note-card" key={`${v.version}-${idx}`}>
+                    <div className="note-title">
+                      v{v.version} {v.is_active ? '✅' : ''}
+                    </div>
+                    <div className="note-meta">
+                      <span>{formatDateTime(v.created_at_iso)}</span>
+                      {v.author ? <span>by {v.author}</span> : null}
+                    </div>
+                    {v.change_log ? <div className="result-preview">{v.change_log}</div> : null}
+                    {!v.is_active ? (
+                      <div className="quick-actions">
+                        <button className="btn btn-secondary btn-sm" onClick={() => onRollback(v.version)}>
+                          回滚到此版本
+                        </button>
+                      </div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function LuminaShell() {
   const [view, setView] = useState('dashboard');
   const [locale, setLocale] = useState(localStorage.getItem(LOCALE_KEY) || 'auto');
@@ -861,6 +1266,7 @@ function LuminaShell() {
     { key: 'search', label: '搜索', i18n: 'nav.search' },
     { key: 'graph', label: '知识图谱', i18n: 'nav.graph' },
     { key: 'notes', label: '笔记管理', i18n: 'nav.notes' },
+    { key: 'templates', label: '提示词', i18n: 'nav.templates' },
     { key: 'config', label: '配置', i18n: 'nav.config' },
   ];
 
@@ -919,6 +1325,7 @@ function LuminaShell() {
         {view === 'search' ? <SearchView /> : null}
         <ReactGraphView active={view === 'graph'} />
         <ReactNotesView active={view === 'notes'} />
+        <ReactTemplatesView active={view === 'templates'} />
         <ReactConfigView active={view === 'config'} />
       </main>
 

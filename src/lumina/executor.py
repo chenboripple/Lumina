@@ -510,261 +510,113 @@ class Executor:
                 }
             )
     
+    # 模板名映射：策略类别 -> PromptManager 模板名
+    EXECUTOR_TEMPLATES = {
+        "single": "note_extractor_single",
+        "chunked": "note_extractor_chunked",
+        "incremental": "note_extractor_incremental",
+        "revisor": "note_revisor",
+    }
+
+    def _build_brief_injection(self, file_info) -> str:
+        """构造文档简述注入串（空表示无简述）。"""
+        brief_summary = file_info.metadata.get("content_brief_summary", "")
+        if not brief_summary:
+            return ""
+        return f"\n[Document Brief: {brief_summary}]\n"
+
+    def _build_guidance_block(self, file_info, lead_index: int) -> str:
+        """根据 instruction 列表编号，将额外的内容指引拼成最后一条。"""
+        guidance = file_info.metadata.get("content_guidance", "")
+        if not guidance:
+            return ""
+        return f"{lead_index}. {guidance}\n"
+
     def _build_prompt_single(self, file_info, content: str, context: ExecutionContext) -> str:
-        """构建单块提示词（支持预分析简述注入）"""
-        strategy = self._select_prompt_strategy(file_info)
-        guidance = file_info.metadata.get("content_guidance", "")
-        guidance_block = f"6. {guidance}\n" if guidance else ""
-        
-        # 检查是否有预分析的简述信息
-        brief_summary = file_info.metadata.get("content_brief_summary", "")
-        brief_injection = ""
-        if brief_summary:
-            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
-        
-        return f"""You are a knowledge extraction expert. Analyze the following content and generate a structured note.
+        """构建单块提示词（通过 PromptManager 渲染）"""
+        return self.prompt_manager.render(
+            self.EXECUTOR_TEMPLATES["single"],
+            filename=file_info.path.name,
+            file_type=file_info.type,
+            file_size=file_info.size,
+            strategy=self._select_prompt_strategy(file_info),
+            brief_injection=self._build_brief_injection(file_info),
+            content=content[:self.CHUNK_SIZE],
+            guidance_block=self._build_guidance_block(file_info, lead_index=10),
+        )
 
-## Source Information
-- File: {file_info.path.name}
-- Type: {file_info.type}
-- Size: {file_info.size} bytes
-- Strategy: {strategy}
-{brief_injection}
-## Content
-```
-{content[:self.CHUNK_SIZE]}
-```
-
-## Instructions
-1. Extract the main topic, why it matters, and the author or system intent
-2. Create a clear, structured summary that preserves factual density instead of generic compression
-3. Capture the most important takeaways as concrete bullets, not vague labels
-4. Pull out supporting details such as examples, constraints, decisions, tradeoffs, numbers, APIs, or references when present
-5. Identify action items or next steps when the source implies them
-6. Capture open questions, unresolved assumptions, or risks when present
-7. Identify potential links to other topics
-8. Suggest relevant tags
-9. Assess content complexity and confidence
-{guidance_block}
-
-## Output Format
-Return JSON with this structure:
-{{
-    "title": "Clear topical title. Do not copy raw filenames, date folders, Collection, Append to, or generic placeholders.",
-    "summary": "2-4 sentence overview that explains what the content is about and why it matters.",
-    "key_points": ["concrete takeaway 1", "concrete takeaway 2", "concrete takeaway 3"],
-    "supporting_details": ["important example, fact, decision, metric, API, or nuance"],
-    "action_items": ["specific next step or follow-up item, if any"],
-    "open_questions": ["unresolved question, ambiguity, dependency, or risk, if any"],
-    "tags": ["tag1", "tag2", "tag3"],
-    "suggested_links": ["Topic A", "Topic B"],
-    "metadata": {{
-        "complexity": "simple|moderate|complex",
-        "confidence": 0.95,
-        "knowledge_density": "low|medium|high",
-        "document_type": "brief|spec|note|report|reference|other",
-        "word_count": 150
-    }}
-}}
-"""
-    
     def _build_prompt_chunked(self, file_info, chunks: List[str], context: ExecutionContext) -> str:
-        """构建分块提示词（支持预分析简述注入）"""
-        guidance = file_info.metadata.get("content_guidance", "")
-        guidance_block = f"7. {guidance}\n" if guidance else ""
-        
-        # 检查是否有预分析的简述信息
-        brief_summary = file_info.metadata.get("content_brief_summary", "")
-        brief_injection = ""
-        if brief_summary:
-            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
-        
-        chunks_text = "\n\n".join([
+        """构建分块提示词（通过 PromptManager 渲染）"""
+        brief_injection = self._build_brief_injection(file_info)
+        chunks_text = "\n\n".join(
             f"### Part {i+1}/{len(chunks)}\n```\n{chunk[:self.CHUNK_SIZE]}\n```"
             for i, chunk in enumerate(chunks)
-        ])
+        )
         if brief_injection:
             chunks_text = brief_injection + chunks_text
-        
-        return f"""You are a knowledge extraction expert. This is a large document split into {len(chunks)} parts. Analyze all parts and generate a comprehensive structured note.
 
-## Source Information
-- File: {file_info.path.name}
-- Type: {file_info.type}
-- Size: {file_info.size} bytes
-- Parts: {len(chunks)}
-
-## Content Parts
-{chunks_text}
-
-## Instructions
-1. Read all parts and understand the complete picture
-2. Extract the core topic, system intent, and major themes across the full document
-3. Create a comprehensive summary that preserves distinctions between goals, facts, decisions, and implications
-4. Produce concrete key points covering the most important knowledge from all parts
-5. Capture supporting details such as examples, constraints, tradeoffs, architecture elements, numbers, or references
-6. Identify action items or practical follow-ups when present
-7. Record open questions, ambiguities, missing dependencies, or risks when present
-8. Identify potential links to other topics
-9. Suggest relevant tags
-10. Assess overall complexity and confidence
-{guidance_block}
-
-## Output Format
-Return JSON with this structure:
-{{
-    "title": "Clear topical title reflecting the document theme. Never reuse raw filenames or generic folder labels.",
-    "summary": "Detailed overview covering all parts and their main implications.",
-    "key_points": ["concrete point 1", "concrete point 2", "concrete point 3", "concrete point 4", "concrete point 5"],
-    "supporting_details": ["important fact, example, tradeoff, dependency, or implementation detail"],
-    "action_items": ["specific next step or follow-up item, if any"],
-    "open_questions": ["unresolved question, ambiguity, dependency, or risk, if any"],
-    "tags": ["tag1", "tag2", "tag3", "tag4"],
-    "suggested_links": ["Topic A", "Topic B", "Topic C"],
-    "metadata": {{
-        "complexity": "simple|moderate|complex",
-        "confidence": 0.95,
-        "knowledge_density": "low|medium|high",
-        "document_type": "brief|spec|note|report|reference|other",
-        "parts_processed": {len(chunks)},
-        "word_count": 500
-    }}
-}}
-"""
+        return self.prompt_manager.render(
+            self.EXECUTOR_TEMPLATES["chunked"],
+            filename=file_info.path.name,
+            file_type=file_info.type,
+            file_size=file_info.size,
+            parts_count=len(chunks),
+            chunks_text=chunks_text,
+            guidance_block=self._build_guidance_block(file_info, lead_index=11),
+        )
 
     def _build_prompt_incremental(self, file_info, changed_blocks: List[Dict[str, Any]], context: ExecutionContext) -> str:
-        """构建增量提示词：基于旧笔记，只更新对应于变化部分的笔记内容，保持其他部分不变"""
-        guidance = file_info.metadata.get("content_guidance", "")
-        guidance_block = f"6. {guidance}\n" if guidance else ""
-
-        # 检查是否有预分析的简述信息
-        brief_summary = file_info.metadata.get("content_brief_summary", "")
-        brief_injection = ""
-        if brief_summary:
-            brief_injection = f"\n[Document Brief: {brief_summary}]\n"
-
-        # 拼接变化的内容
-        changes_text = []
+        """构建增量提示词（通过 PromptManager 渲染）"""
+        change_lines: List[str] = []
         for i, block in enumerate(changed_blocks, 1):
             block_type = block.get("type", "modified")
             content = block.get("content", "")
             old_content = block.get("old_content", "")
+            start_line = block.get("start_line", "?")
+            end_line = block.get("end_line", "?")
             if block_type == "removed":
-                changes_text.append(f"### [REMOVED] Section {i} (lines {block['start_line']}-{block['end_line']})\n```\n{content}\n```")
+                change_lines.append(f"### [REMOVED] Section {i} (lines {start_line}-{end_line})\n```\n{content}\n```")
             elif block_type == "added":
-                changes_text.append(f"### [ADDED] Section {i} (lines {block['start_line']}-{block['end_line']})\n```\n{content}\n```")
-            elif block_type == "modified":
-                changes_text.append(
-                    f"### [MODIFIED] Section {i} (lines {block['start_line']}-{block['end_line']})\n"
+                change_lines.append(f"### [ADDED] Section {i} (lines {start_line}-{end_line})\n```\n{content}\n```")
+            else:
+                change_lines.append(
+                    f"### [MODIFIED] Section {i} (lines {start_line}-{end_line})\n"
                     f"OLD:\n```\n{old_content}\n```\n"
                     f"NEW:\n```\n{content}\n```"
                 )
 
-        change_ratio = file_info.metadata.get("incremental_change_ratio", 0.0)
+        change_ratio = float(file_info.metadata.get("incremental_change_ratio", 0.0) or 0.0)
         old_note = file_info.metadata.get("incremental_old_note", "")
 
-        return f"""You are a knowledge extraction expert. A previously-processed source file was modified. Your task is to UPDATE the existing knowledge note to reflect only the changes, while keeping all other parts of the note intact.
-
-## Source Information
-- File: {file_info.path.name}
-- Type: {file_info.type}
-- Mode: incremental update
-- Change ratio: {change_ratio:.1%}
-{brief_injection}
-## Changed Sections of Source File
-{chr(10).join(changes_text)}
-
-## Previous Note (keep this structure, only update relevant parts)
-```
-{old_note}
-```
-
-## Instructions
-Generate an updated knowledge note based on the previous note and the changed sections of the source file:
-
-1. Keep the note structure, tone, and most content exactly the same as the previous note
-2. Only update sections related to the source file changes
-3. If sections were removed from the source, remove corresponding parts from the note
-4. If sections were added, add new corresponding parts to the note
-5. If sections were modified, update the corresponding parts of the note
-6. Ensure the updated note remains coherent and comprehensive
-{guidance_block}
-
-## Output Format
-Return JSON with this structure (keep the same structure, just update the content):
-{{
-    "title": "Updated topical title (keep the same if changes don't affect the topic)",
-    "summary": "Updated 2-4 sentence overview reflecting the changes",
-    "key_points": ["concrete takeaway 1", "concrete takeaway 2 (keep most points unchanged)"],
-    "supporting_details": ["important detail 1 (keep most details unchanged)"],
-    "action_items": ["follow-up if any (update only if changes affect actions)"],
-    "open_questions": ["unresolved question if any (update only if changes affect questions)"],
-    "tags": ["tag1", "tag2 (keep most tags unchanged)"],
-    "suggested_links": ["Topic A", "Topic B (keep most links unchanged)"],
-    "metadata": {{
-        "complexity": "simple|moderate|complex",
-        "confidence": 0.9,
-        "update_mode": "incremental",
-        "change_ratio": {change_ratio}
-    }}
-}}
-"""
+        return self.prompt_manager.render(
+            self.EXECUTOR_TEMPLATES["incremental"],
+            filename=file_info.path.name,
+            file_type=file_info.type,
+            change_ratio=change_ratio,
+            change_ratio_pct=f"{change_ratio:.1%}",
+            brief_injection=self._build_brief_injection(file_info),
+            changes_text="\n".join(change_lines),
+            old_note=old_note,
+            guidance_block=self._build_guidance_block(file_info, lead_index=7),
+        )
 
     def _build_fix_prompt(self, context: ExecutionContext) -> str:
-        """构建修复提示词"""
+        """构建修复提示词（通过 PromptManager 渲染）"""
         current = context.previous_output
         validation = context.previous_validation
-        
-        issues_text = "\n".join([
+
+        issues_text = "\n".join(
             f"- [{i.severity}] {i.type}: {i.message}"
             for i in validation.issues
-        ])
-        
-        suggestions_text = "\n".join([
-            f"- {s}"
-            for s in validation.suggestions
-        ])
-        
-        return f"""You are a content editor. Fix the following note based on quality feedback.
+        )
+        suggestions_text = "\n".join(f"- {s}" for s in validation.suggestions)
 
-## Current Content
-```
-{current.content[:2000]}
-```
-
-## Quality Issues
-{issues_text}
-
-## Fix Suggestions
-{suggestions_text}
-
-## Instructions
-1. Fix all issues listed above
-2. Keep the core information intact
-3. Improve structure and clarity
-4. Increase factual density where the current note is too generic or thin
-5. Preserve concrete examples, decisions, constraints, and unresolved questions when they exist in the source
-6. Maintain the same JSON output format
-7. Increase quality score
-
-## Output Format
-Return JSON with this structure:
-{{
-    "title": "Improved title",
-    "summary": "Improved summary",
-    "key_points": ["improved point 1", "improved point 2"],
-    "supporting_details": ["important fact or nuance"],
-    "action_items": ["next step, if any"],
-    "open_questions": ["remaining question or risk, if any"],
-    "tags": ["tag1", "tag2"],
-    "suggested_links": ["Topic A", "Topic B"],
-    "metadata": {{
-        "complexity": "simple|moderate|complex",
-        "confidence": 0.95,
-        "knowledge_density": "low|medium|high"
-    }}
-}}
-"""
+        return self.prompt_manager.render(
+            self.EXECUTOR_TEMPLATES["revisor"],
+            current_content=current.content[:2000],
+            issues_text=issues_text,
+            suggestions_text=suggestions_text,
+        )
     
     def _call_llm(self, prompt: str, context: ExecutionContext) -> str:
         """调用 LLM（带统计）"""
