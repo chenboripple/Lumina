@@ -7,7 +7,8 @@
     "search": "搜尋",
     "graph": "知識圖譜",
     "notes": "筆記管理",
-    "config": "設定"
+    "config": "設定",
+    "templates": "提示詞"
   },
   "locale": {
     "label": "語言"
@@ -27,6 +28,9 @@
     },
     "config": {
       "title": "⚙️ 設定"
+    },
+    "templates": {
+      "title": "📋 提示詞範本"
     }
   },
   "stats": {

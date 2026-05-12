@@ -1,19 +1,37 @@
 {
-  "meta": { "title": "Lumina - 知识管理" },
+  "meta": {
+    "title": "Lumina - 知识管理"
+  },
   "nav": {
     "dashboard": "仪表板",
     "search": "搜索",
     "graph": "知识图谱",
     "notes": "笔记管理",
-    "config": "配置"
+    "config": "配置",
+    "templates": "提示词"
   },
-  "locale": { "label": "语言" },
+  "locale": {
+    "label": "语言"
+  },
   "view": {
-    "dashboard": { "title": "📊 仪表板" },
-    "search": { "title": "🔍 语义搜索" },
-    "graph": { "title": "🕸️ 知识图谱" },
-    "notes": { "title": "📝 笔记管理" },
-    "config": { "title": "⚙️ 配置" }
+    "dashboard": {
+      "title": "📊 仪表板"
+    },
+    "search": {
+      "title": "🔍 语义搜索"
+    },
+    "graph": {
+      "title": "🕸️ 知识图谱"
+    },
+    "notes": {
+      "title": "📝 笔记管理"
+    },
+    "config": {
+      "title": "⚙️ 配置"
+    },
+    "templates": {
+      "title": "📋 提示词模板"
+    }
   },
   "stats": {
     "total_notes": "总笔记数",
@@ -116,7 +134,9 @@
     }
   },
   "failure": {
-    "modal": { "title": "失败详情" },
+    "modal": {
+      "title": "失败详情"
+    },
     "select_all": "全选",
     "tag_input_placeholder": "输入标签，逗号分隔",
     "batch_tag": "批量打标签",

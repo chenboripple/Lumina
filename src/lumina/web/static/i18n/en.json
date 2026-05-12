@@ -7,17 +7,31 @@
     "search": "Search",
     "graph": "Knowledge Graph",
     "notes": "Notes",
-    "config": "Config"
+    "config": "Config",
+    "templates": "Templates"
   },
   "locale": {
     "label": "Language"
   },
   "view": {
-    "dashboard": { "title": "📊 Dashboard" },
-    "search": { "title": "🔍 Semantic Search" },
-    "graph": { "title": "🕸️ Knowledge Graph" },
-    "notes": { "title": "📝 Notes" },
-    "config": { "title": "⚙️ Config" }
+    "dashboard": {
+      "title": "📊 Dashboard"
+    },
+    "search": {
+      "title": "🔍 Semantic Search"
+    },
+    "graph": {
+      "title": "🕸️ Knowledge Graph"
+    },
+    "notes": {
+      "title": "📝 Notes"
+    },
+    "config": {
+      "title": "⚙️ Config"
+    },
+    "templates": {
+      "title": "📋 Prompt Templates"
+    }
   },
   "stats": {
     "total_notes": "Total Notes",
@@ -120,7 +134,9 @@
     }
   },
   "failure": {
-    "modal": { "title": "Failure Details" },
+    "modal": {
+      "title": "Failure Details"
+    },
     "select_all": "Select all",
     "tag_input_placeholder": "Enter tags separated by commas",
     "batch_tag": "Batch Tag",

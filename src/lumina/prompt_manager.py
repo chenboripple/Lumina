@@ -385,6 +385,206 @@ class PromptManager:
 """,
                 tags=["analysis", "preprocessing"],
             ),
+
+            "note_extractor_single": PromptTemplate(
+                name="note_extractor_single",
+                description="单块内容笔记提取（Executor 默认 prompt）",
+                content="""You are a knowledge extraction expert. Analyze the following content and generate a structured note.
+
+## Source Information
+- File: {{filename}}
+- Type: {{file_type}}
+- Size: {{file_size}} bytes
+- Strategy: {{strategy}}
+{{brief_injection}}
+## Content
+```
+{{content}}
+```
+
+## Instructions
+1. Extract the main topic, why it matters, and the author or system intent
+2. Create a clear, structured summary that preserves factual density instead of generic compression
+3. Capture the most important takeaways as concrete bullets, not vague labels
+4. Pull out supporting details such as examples, constraints, decisions, tradeoffs, numbers, APIs, or references when present
+5. Identify action items or next steps when the source implies them
+6. Capture open questions, unresolved assumptions, or risks when present
+7. Identify potential links to other topics
+8. Suggest relevant tags
+9. Assess content complexity and confidence
+{{guidance_block}}
+
+## Output Format
+Return JSON with this structure:
+{
+    "title": "Clear topical title. Do not copy raw filenames, date folders, Collection, Append to, or generic placeholders.",
+    "summary": "2-4 sentence overview that explains what the content is about and why it matters.",
+    "key_points": ["concrete takeaway 1", "concrete takeaway 2", "concrete takeaway 3"],
+    "supporting_details": ["important example, fact, decision, metric, API, or nuance"],
+    "action_items": ["specific next step or follow-up item, if any"],
+    "open_questions": ["unresolved question, ambiguity, dependency, or risk, if any"],
+    "tags": ["tag1", "tag2", "tag3"],
+    "suggested_links": ["Topic A", "Topic B"],
+    "metadata": {
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.95,
+        "knowledge_density": "low|medium|high",
+        "document_type": "brief|spec|note|report|reference|other",
+        "word_count": 150
+    }
+}
+""",
+                tags=["extraction", "executor"],
+            ),
+
+            "note_extractor_chunked": PromptTemplate(
+                name="note_extractor_chunked",
+                description="分块内容笔记提取（Executor 大文件 prompt）",
+                content="""You are a knowledge extraction expert. This is a large document split into {{parts_count}} parts. Analyze all parts and generate a comprehensive structured note.
+
+## Source Information
+- File: {{filename}}
+- Type: {{file_type}}
+- Size: {{file_size}} bytes
+- Parts: {{parts_count}}
+
+## Content Parts
+{{chunks_text}}
+
+## Instructions
+1. Read all parts and understand the complete picture
+2. Extract the core topic, system intent, and major themes across the full document
+3. Create a comprehensive summary that preserves distinctions between goals, facts, decisions, and implications
+4. Produce concrete key points covering the most important knowledge from all parts
+5. Capture supporting details such as examples, constraints, tradeoffs, architecture elements, numbers, or references
+6. Identify action items or practical follow-ups when present
+7. Record open questions, ambiguities, missing dependencies, or risks when present
+8. Identify potential links to other topics
+9. Suggest relevant tags
+10. Assess overall complexity and confidence
+{{guidance_block}}
+
+## Output Format
+Return JSON with this structure:
+{
+    "title": "Clear topical title reflecting the document theme. Never reuse raw filenames or generic folder labels.",
+    "summary": "Detailed overview covering all parts and their main implications.",
+    "key_points": ["concrete point 1", "concrete point 2", "concrete point 3", "concrete point 4", "concrete point 5"],
+    "supporting_details": ["important fact, example, tradeoff, dependency, or implementation detail"],
+    "action_items": ["specific next step or follow-up item, if any"],
+    "open_questions": ["unresolved question, ambiguity, dependency, or risk, if any"],
+    "tags": ["tag1", "tag2", "tag3", "tag4"],
+    "suggested_links": ["Topic A", "Topic B", "Topic C"],
+    "metadata": {
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.95,
+        "knowledge_density": "low|medium|high",
+        "document_type": "brief|spec|note|report|reference|other",
+        "parts_processed": {{parts_count}},
+        "word_count": 500
+    }
+}
+""",
+                tags=["extraction", "executor", "chunked"],
+            ),
+
+            "note_extractor_incremental": PromptTemplate(
+                name="note_extractor_incremental",
+                description="增量内容笔记更新（Executor 增量 prompt）",
+                content="""You are a knowledge extraction expert. A previously-processed source file was modified. Your task is to UPDATE the existing knowledge note to reflect only the changes, while keeping all other parts of the note intact.
+
+## Source Information
+- File: {{filename}}
+- Type: {{file_type}}
+- Mode: incremental update
+- Change ratio: {{change_ratio_pct}}
+{{brief_injection}}
+## Changed Sections of Source File
+{{changes_text}}
+
+## Previous Note (keep this structure, only update relevant parts)
+```
+{{old_note}}
+```
+
+## Instructions
+Generate an updated knowledge note based on the previous note and the changed sections of the source file:
+
+1. Keep the note structure, tone, and most content exactly the same as the previous note
+2. Only update sections related to the source file changes
+3. If sections were removed from the source, remove corresponding parts from the note
+4. If sections were added, add new corresponding parts to the note
+5. If sections were modified, update the corresponding parts of the note
+6. Ensure the updated note remains coherent and comprehensive
+{{guidance_block}}
+
+## Output Format
+Return JSON with this structure (keep the same structure, just update the content):
+{
+    "title": "Updated topical title (keep the same if changes don't affect the topic)",
+    "summary": "Updated 2-4 sentence overview reflecting the changes",
+    "key_points": ["concrete takeaway 1", "concrete takeaway 2 (keep most points unchanged)"],
+    "supporting_details": ["important detail 1 (keep most details unchanged)"],
+    "action_items": ["follow-up if any (update only if changes affect actions)"],
+    "open_questions": ["unresolved question if any (update only if changes affect questions)"],
+    "tags": ["tag1", "tag2 (keep most tags unchanged)"],
+    "suggested_links": ["Topic A", "Topic B (keep most links unchanged)"],
+    "metadata": {
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.9,
+        "update_mode": "incremental",
+        "change_ratio": {{change_ratio}}
+    }
+}
+""",
+                tags=["extraction", "executor", "incremental"],
+            ),
+
+            "note_revisor": PromptTemplate(
+                name="note_revisor",
+                description="基于校验反馈修复笔记（Executor revise prompt）",
+                content="""You are a content editor. Fix the following note based on quality feedback.
+
+## Current Content
+```
+{{current_content}}
+```
+
+## Quality Issues
+{{issues_text}}
+
+## Fix Suggestions
+{{suggestions_text}}
+
+## Instructions
+1. Fix all issues listed above
+2. Keep the core information intact
+3. Improve structure and clarity
+4. Increase factual density where the current note is too generic or thin
+5. Preserve concrete examples, decisions, constraints, and unresolved questions when they exist in the source
+6. Maintain the same JSON output format
+7. Increase quality score
+
+## Output Format
+Return JSON with this structure:
+{
+    "title": "Improved title",
+    "summary": "Improved summary",
+    "key_points": ["improved point 1", "improved point 2"],
+    "supporting_details": ["important fact or nuance"],
+    "action_items": ["next step, if any"],
+    "open_questions": ["remaining question or risk, if any"],
+    "tags": ["tag1", "tag2"],
+    "suggested_links": ["Topic A", "Topic B"],
+    "metadata": {
+        "complexity": "simple|moderate|complex",
+        "confidence": 0.95,
+        "knowledge_density": "low|medium|high"
+    }
+}
+""",
+                tags=["revision", "executor"],
+            ),
         }
         
         for name, template in builtin_templates.items():

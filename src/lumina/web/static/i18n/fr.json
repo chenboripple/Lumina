@@ -7,7 +7,8 @@
     "search": "Recherche",
     "graph": "Graphe de connaissances",
     "notes": "Notes",
-    "config": "Configuration"
+    "config": "Configuration",
+    "templates": "Modèles"
   },
   "locale": {
     "label": "Langue"
@@ -129,6 +130,9 @@
     },
     "config": {
       "title": "⚙️ Config"
+    },
+    "templates": {
+      "title": "📋 Modèles de Prompt"
     }
   },
   "stats": {

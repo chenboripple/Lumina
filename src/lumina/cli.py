@@ -1393,3 +1393,280 @@ def init(force):
         click.echo("  lumina start              启动后台服务")
         click.echo(f"  lumina process {input_dir}  立即处理文件")
         click.echo("  lumina serve              前台启动 Web 界面")
+
+
+# ============================================================
+# Template 命令组：管理 PromptManager 中的提示词模板
+# ============================================================
+
+@cli.group()
+def template():
+    """提示词模板管理（list/show/edit/create/delete/export/import/versions/rollback）"""
+    pass
+
+
+def _load_prompt_manager():
+    """延迟加载 PromptManager，避免影响其他命令启动速度"""
+    from lumina.prompt_manager import get_prompt_manager
+    return get_prompt_manager()
+
+
+@template.command("list")
+@click.option('--tag', '-t', default=None, help='按标签过滤')
+def template_list(tag):
+    """列出所有提示词模板"""
+    pm = _load_prompt_manager()
+    templates = pm.list_templates(tag=tag)
+
+    if not templates:
+        click.echo("（无模板）")
+        return
+
+    if RICH_AVAILABLE:
+        console = Console()
+        table = Table(title="提示词模板")
+        table.add_column("名称", style="cyan")
+        table.add_column("版本")
+        table.add_column("描述")
+        table.add_column("变量数", justify="right")
+        table.add_column("标签", style="dim")
+        for t in templates:
+            table.add_row(
+                t.name,
+                t.version,
+                t.description or "-",
+                str(len(t.variables)),
+                ", ".join(t.tags) if t.tags else "-",
+            )
+        console.print(table)
+    else:
+        for t in templates:
+            click.echo(f"  {t.name} (v{t.version}) [{', '.join(t.tags) or '-'}] - {t.description}")
+
+
+@template.command("show")
+@click.argument('name')
+@click.option('--vars-only', is_flag=True, default=False, help='仅显示变量列表')
+def template_show(name, vars_only):
+    """显示模板详情"""
+    pm = _load_prompt_manager()
+    t = pm.get(name)
+    if t is None:
+        raise click.ClickException(f"模板不存在: {name}")
+
+    if vars_only:
+        click.echo(f"模板 {name} 的变量:")
+        for v in t.variables:
+            mark = "*" if v.required else " "
+            default = f" = {v.default_value}" if v.default_value else ""
+            click.echo(f"  [{mark}] {v.name}{default}")
+        return
+
+    click.echo(f"# 模板: {t.name}")
+    click.echo(f"版本: {t.version}")
+    click.echo(f"描述: {t.description or '-'}")
+    click.echo(f"标签: {', '.join(t.tags) or '-'}")
+    click.echo(f"变量: {', '.join(v.name for v in t.variables) or '无'}")
+    click.echo("\n--- 内容 ---")
+    click.echo(t.content)
+
+
+@template.command("edit")
+@click.argument('name')
+def template_edit(name):
+    """用 $EDITOR 打开模板进行编辑"""
+    import tempfile
+    import shutil
+
+    pm = _load_prompt_manager()
+    t = pm.get(name)
+    if t is None:
+        raise click.ClickException(f"模板不存在: {name}")
+
+    editor = os.environ.get("EDITOR") or os.environ.get("VISUAL") or ("notepad" if os.name == "nt" else "vi")
+
+    with tempfile.NamedTemporaryFile('w', suffix=f".{name}.md", delete=False, encoding='utf-8') as f:
+        f.write(t.content)
+        tmp_path = f.name
+
+    try:
+        result = subprocess.run([editor, tmp_path], check=False)
+        if result.returncode != 0:
+            raise click.ClickException(f"编辑器退出码非零: {result.returncode}")
+
+        with open(tmp_path, 'r', encoding='utf-8') as f:
+            new_content = f.read()
+
+        if new_content == t.content:
+            click.echo("内容未改动，已取消保存")
+            return
+
+        from lumina.prompt_manager import PromptTemplate
+        new_template = PromptTemplate(
+            name=t.name,
+            content=new_content,
+            description=t.description,
+            version=t.version,
+            tags=list(t.tags),
+            metadata=dict(t.metadata),
+        )
+        pm.save(new_template)
+        click.echo(f"✅ 已保存模板 {name} (v{new_template.version})")
+    finally:
+        try:
+            Path(tmp_path).unlink()
+        except OSError:
+            pass
+
+
+@template.command("create")
+@click.argument('name')
+@click.option('--description', '-d', default="", help='模板描述')
+@click.option('--tags', '-t', default="", help='标签（逗号分隔）')
+@click.option('--from-file', '-f', type=click.Path(exists=True), default=None, help='从文件读取模板内容')
+def template_create(name, description, tags, from_file):
+    """新建模板（内容来自 --from-file 或 stdin，使用 {{var}} 语法）"""
+    from lumina.prompt_manager import PromptTemplate
+
+    pm = _load_prompt_manager()
+    if pm.get(name) is not None:
+        raise click.ClickException(f"模板已存在: {name}（如需修改请用 edit）")
+
+    if from_file:
+        content = Path(from_file).read_text(encoding='utf-8')
+    else:
+        click.echo("请粘贴模板内容（Ctrl-D / Ctrl-Z 结束）：")
+        content = sys.stdin.read()
+
+    if not content.strip():
+        raise click.ClickException("模板内容不能为空")
+
+    tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else []
+    t = PromptTemplate(name=name, content=content, description=description, tags=tag_list)
+    pm.save(t)
+
+    click.echo(f"✅ 已创建模板 {name} (v{t.version})，变量: {', '.join(v.name for v in t.variables) or '无'}")
+
+
+@template.command("delete")
+@click.argument('name')
+@click.option('--yes', '-y', is_flag=True, default=False, help='跳过确认')
+def template_delete(name, yes):
+    """删除用户模板（无法删除内置模板对应的磁盘文件，但会从内存中移除）"""
+    pm = _load_prompt_manager()
+    if pm.get(name) is None:
+        raise click.ClickException(f"模板不存在: {name}")
+
+    if not yes and not click.confirm(f"确认删除模板 {name}?", default=False):
+        click.echo("已取消")
+        return
+
+    ok = pm.delete(name)
+    if ok:
+        click.echo(f"🗑️  已删除模板 {name}")
+    else:
+        raise click.ClickException(f"删除失败: {name}")
+
+
+@template.command("export")
+@click.argument('output_path', type=click.Path())
+def template_export(output_path):
+    """导出所有模板到 JSON 文件"""
+    pm = _load_prompt_manager()
+    pm.export_all(output_path)
+    click.echo(f"✅ 已导出到: {output_path}")
+
+
+@template.command("import")
+@click.argument('input_path', type=click.Path(exists=True))
+def template_import(input_path):
+    """从 JSON 文件导入模板"""
+    pm = _load_prompt_manager()
+    pm.import_all(input_path)
+    # 导入后落盘
+    for t in pm.list_templates():
+        pm.save(t)
+    click.echo(f"✅ 已从 {input_path} 导入")
+
+
+@template.command("versions")
+@click.argument('name')
+def template_versions(name):
+    """查看模板版本历史"""
+    pm = _load_prompt_manager()
+    if pm.get(name) is None:
+        raise click.ClickException(f"模板不存在: {name}")
+
+    versions = pm.get_versions(name)
+    if not versions:
+        click.echo("（无历史版本）")
+        return
+
+    if RICH_AVAILABLE:
+        console = Console()
+        table = Table(title=f"{name} 版本历史")
+        table.add_column("版本", style="cyan")
+        table.add_column("时间")
+        table.add_column("作者")
+        table.add_column("当前", justify="center")
+        table.add_column("说明", style="dim")
+        for v in versions:
+            ts = datetime.fromtimestamp(v.created_at).strftime("%Y-%m-%d %H:%M:%S")
+            table.add_row(
+                v.version,
+                ts,
+                v.author or "-",
+                "✓" if v.is_active else "",
+                v.change_log or "-",
+            )
+        console.print(table)
+    else:
+        for v in versions:
+            ts = datetime.fromtimestamp(v.created_at).strftime("%Y-%m-%d %H:%M:%S")
+            marker = "*" if v.is_active else " "
+            click.echo(f"  [{marker}] v{v.version} @ {ts} - {v.change_log or '-'}")
+
+
+@template.command("rollback")
+@click.argument('name')
+@click.argument('version')
+def template_rollback(name, version):
+    """回滚模板到指定历史版本"""
+    pm = _load_prompt_manager()
+    if pm.get(name) is None:
+        raise click.ClickException(f"模板不存在: {name}")
+
+    ok = pm.rollback(name, version)
+    if ok:
+        # 持久化回滚后的模板
+        pm.save(pm.get(name))
+        click.echo(f"✅ 模板 {name} 已回滚到 v{version}")
+    else:
+        raise click.ClickException(f"回滚失败：未找到 v{version}")
+
+
+@template.command("render")
+@click.argument('name')
+@click.option('--var', '-v', 'vars_', multiple=True, help='变量赋值 (格式: key=value，可多次使用)')
+@click.option('--vars-file', type=click.Path(exists=True), default=None, help='从 JSON 文件加载变量')
+def template_render(name, vars_, vars_file):
+    """预览渲染结果（用于调试模板）"""
+    pm = _load_prompt_manager()
+    if pm.get(name) is None:
+        raise click.ClickException(f"模板不存在: {name}")
+
+    kwargs: Dict[str, Any] = {}
+    if vars_file:
+        kwargs.update(json.loads(Path(vars_file).read_text(encoding='utf-8')))
+    for entry in vars_:
+        if "=" not in entry:
+            raise click.ClickException(f"变量格式必须是 key=value: {entry}")
+        k, v = entry.split("=", 1)
+        kwargs[k.strip()] = v
+
+    try:
+        rendered = pm.render(name, **kwargs)
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(rendered)
