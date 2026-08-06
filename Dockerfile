@@ -17,7 +17,6 @@ RUN apt-get update && apt-get install -y \
 COPY pyproject.toml requirements.txt ./
 COPY src/ ./src/
 COPY docs/ ./docs/
-COPY examples/ ./examples/
 
 # 安装 Python 依赖
 RUN pip install --no-cache-dir -e .
